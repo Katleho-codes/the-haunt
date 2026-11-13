@@ -35,7 +35,7 @@ Nothing is stored until you add something. Fictional demo commitments load only 
 
 ## Requirements
 
-- Node.js 20.9+ (Node.js 22 recommended)
+- Node.js 22 or newer (24 recommended; Next.js 16 needs at least 20.9, but Node 20 reached end of life on 30 April 2026)
 - npm 10+
 
 ## Run locally
@@ -66,6 +66,41 @@ npm run e2e                    # end-to-end smoke test
 node e2e/contrast.mjs          # text contrast audit (WCAG AA)
 node e2e/screenshots.mjs       # screenshots at 390, 768 and 1280 px, overflow and touch-target check
 ```
+
+## Self-hosting with Docker
+
+The repository includes a `Dockerfile` (multi-stage, Node 24 Alpine, runs as an unprivileged user, has a health check) and a `docker-compose.yml` for a home server.
+
+```bash
+docker compose up -d --build        # then open http://<host>:3200
+HAUNT_PORT=8080 docker compose up -d   # use another port
+docker compose logs -f
+docker compose down
+```
+
+Or without Compose: `docker build -t the-haunt .` then `docker run -d -p 3200:3000 --read-only --tmpfs /tmp the-haunt`.
+
+Notes:
+
+- The first build needs internet access: `next/font` downloads the three Google fonts and bundles them into the image, so visitors' browsers never contact Google.
+- The container stores nothing and needs no environment variables, database or secrets. Each visitor's data stays in their own browser (see `docs/PRIVACY-NOTES.md`).
+- If it is reachable from outside your network, put a reverse proxy with HTTPS in front of it. The app does not set a Content-Security-Policy or other security headers yet; add them at the proxy or in `next.config.ts` after testing in a browser.
+- The browser smoke test can be pointed at the container: `node e2e/smoke.mjs http://localhost:3200`.
+- Image size is about 335 MB. Pin the base image by digest in the `Dockerfile` if you need repeatable builds.
+- Node 24 is the current Active LTS (Node 22 is in maintenance until 30 April 2027; Node 20 reached end of life on 30 April 2026). To build on another version: `docker build --build-arg NODE_VERSION=22 .`.
+
+### A hidden backend (optional, nothing uses it yet)
+
+There is **no backend yet**: today the app is local-first and the web container is all it needs. The compose file already lays out where a backend will live so it is never exposed:
+
+```text
+browser --> web container (the only published port) --> api container (internal network only)
+```
+
+- The `api` service is behind the `backend` compose profile, so `docker compose up` does not start it. Start it with `docker compose --profile backend up -d --build` after setting `API_TOKEN` in a `.env` file (see `.env.example`).
+- It publishes no port, sits on a Docker network marked `internal: true` (no internet, no route to the host), and only the web container is attached to that network.
+- Only the web container's server code should call it, at `http://api:4000`, with `Authorization: Bearer $API_TOKEN`. The token is server-side only and must never be a `NEXT_PUBLIC_*` variable.
+- `apps/api` is a **placeholder with no features** (it answers `/health` and refuses everything else). It exists to prove the isolation, not to be described as a backend. `scripts/check-isolation.ps1` runs 16 checks against the running stack.
 
 ## Data storage
 

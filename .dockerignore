@@ -1,0 +1,29 @@
+# Keep the build context small and stop local files leaking into the image.
+.git
+.gitignore
+.gitattributes
+.github
+.kiro
+.next
+node_modules
+out
+coverage
+*.log
+*.tsbuildinfo
+
+# Environment files (the app needs none at runtime; never bake secrets into an image)
+.env
+.env.*
+!.env.example
+
+# Not needed to build or run
+docs
+apps
+e2e
+tests
+vitest.config.mts
+KIRO-MASTER-BRIEF.md
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore

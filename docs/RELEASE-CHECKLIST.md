@@ -20,7 +20,7 @@ Source: https://kiroween.devpost.com/rules (fetched and read on 13 November 2026
 | # | Requirement (official rules) | Status | Evidence / what is missing |
 |---|---|---|---|
 | 1 | Built using Kiro. "Insufficient use of Kiro will result in disqualification." | **At risk** | Real use is listed in `docs/KIRO-USAGE-LOG.md`. Hooks have not fired, no MCP, no Powers, only one custom agent has run once, and Kiro's spec task runner has not been used. See section 3. |
-| 2 | URL to a functional application; login details if needed | **Open** | Nothing is deployed. No login is needed (local-first), so no credentials are required. |
+| 2 | URL to a functional application; login details if needed | **Open** | Owner will self-host on a homelab (Docker image ready and tested locally). No public URL yet. No login is needed (local-first), so no credentials are required. |
 | 3 | Text description of features | **Open** | Draft material: README "Current build" and `docs/PRODUCT-STATUS.md`. Write it for Devpost last. |
 | 4 | Demo video under 3 minutes, public on YouTube, showing the real app, no third-party trademarks or copyrighted music | **Open** | Not recorded. Script: `docs/DEMO-SCRIPT.md`. |
 | 5 | Public GitHub repository (not GitLab or Bitbucket) | **Open: repo is private** | Remote is `github.com/Katleho-codes/the-haunt`. An unauthenticated request to the repo page and the GitHub API both returned 404 on 13 Nov 2026, while `git ls-remote` from this machine works, so it is private (or not yet reachable publicly). Make it public. |
@@ -30,7 +30,7 @@ Source: https://kiroween.devpost.com/rules (fetched and read on 13 November 2026
 | 9 | Category and bonus categories identified | Open | Costume Contest. Bonus prizes only if genuinely eligible (see section 6). |
 | 10 | Write-up of how Kiro was used | Draft | `docs/KIRO-WRITEUP-DRAFT.md`, written only from the usage log. Must be updated if more Kiro work is done. |
 | 11 | Project built during the submission period; disclose pre-existing work | Needs the owner | First commit is 13 Nov 2026 11:39 SAST, inside the period. The brief says the initial scaffold was generated with ChatGPT outside Kiro. That is now disclosed in the README and the usage log; confirm the wording and that nothing older than 30 Oct 2026 is included. |
-| 12 | Free access for judges until judging ends | Open | Needs a free host and a stable URL (section 4). |
+| 12 | Free access for judges until judging ends | Open | Needs a stable public address on the homelab until 29 Jan 2027 (section 4). |
 
 ## 2. Engineering checks (as of the last full run, 13 November 2026, commit `f02b2c0`)
 
@@ -43,7 +43,8 @@ Source: https://kiroween.devpost.com/rules (fetched and read on 13 November 2026
 | Browser smoke test (Edge, local production build) | Pass: 30 steps | `npm run e2e` (server on port 3100) |
 | Contrast audit | Pass: 664 text elements (gradients approximated) | `node e2e/contrast.mjs` |
 | Screenshots, overflow and tap targets at 390/768/1280 px | Pass | `node e2e/screenshots.mjs` |
-| E2E on the **deployed** app | **Not run, nothing deployed** | `node e2e/smoke.mjs https://<url>` after deploying |
+| E2E against the Docker container on localhost | Pass: 30 steps | `node e2e/smoke.mjs http://localhost:3200` |
+| E2E on the **public** address | **Not run: no public address yet** | `node e2e/smoke.mjs https://<url>` |
 | Chrome, Firefox, Safari, real phone, screen reader | **Not tested** | manual |
 | Security headers (CSP etc.) | **Not set** | see section 4 |
 | CI | **None** | optional |
@@ -55,16 +56,34 @@ Source: https://kiroween.devpost.com/rules (fetched and read on 13 November 2026
 - Not used: Kiro's spec task runner, MCP servers, Powers, Kiro CLI, Kiro Web, Kiro Crew.
 - Nothing may be described as used until it is. If the owner wants a stronger Kiro story before the deadline, the honest options are to do real work that way, for example: run remaining spec tasks through Kiro's task runner so the hook fires, give a bounded task to `domain-engineer` or `experience-engineer`, or connect a Playwright MCP server for the browser checks. Do it only if it does real work, then log it with evidence. Screenshots of a Kiro run (task runner, hook output, agent run) should be saved under `docs/evidence/`.
 
-## 4. Deployment plan (nothing done yet)
+## 4. Deployment plan (container ready; not yet running anywhere public)
 
-The build is a static Next.js export-capable app with no server, database or secrets, so the cheapest stable host is a free static or Next host (for example Vercel or Netlify, or GitHub Pages with a static export). Decision needed from the owner.
+Owner decision (13 Nov 2026): **the owner hosts it on their own homelab.** A `Dockerfile`, `.dockerignore` and `docker-compose.yml` are in the repo.
 
-- [ ] Choose host and create the project from the public repo.
-- [ ] Set Node 20.9+ (22 recommended, `.nvmrc` exists).
-- [ ] Build command `npm run build`. Check that the font download at build time works on the host.
-- [ ] Add security headers in `next.config.ts` (CSP, `X-Content-Type-Options`, `Referrer-Policy`, frame restrictions) and test the CSP against a production build, because Next injects inline scripts. Do not ship a CSP that has not been run in a browser.
-- [ ] Run `node e2e/smoke.mjs <deployed url>` and keep the output in `docs/evidence/`.
-- [ ] Open the URL in a clean browser profile and in a phone browser.
+Verified on 13 Nov 2026, on the developer machine:
+- [x] `docker build` succeeds (after the lockfile fix below) and the image is about 335 MB.
+- [x] The container runs read-only, with all capabilities dropped and `no-new-privileges`, as uid 1001, and reports healthy.
+- [x] `node e2e/smoke.mjs http://localhost:3200` against the **container**: 30 of 30 steps pass.
+- [x] `docker compose config` validates.
+- [x] `docker compose --profile backend up --build` runs both containers on Node 24; the web container and the placeholder API both report healthy, and the 30-step browser test passes against that stack.
+- [x] Hidden API: `scripts/check-isolation.ps1` passes 16 of 16 checks on Docker Desktop for Windows (API publishes no port, internal-only network, not reachable from the host, token required, no internet or host access from the API, token not in any browser output). There is no real backend yet; `apps/api` is a placeholder.
+- Not verified: the isolation checks on a Linux host, ARM builds, behind a reverse proxy, from another machine, and over HTTPS.
+
+Lockfile note: `npm ci` inside the Linux image failed because the lockfile (written on Windows) lacked two optional packages (`@emnapi/core`, `@emnapi/runtime`). The lockfile was regenerated with `npm install --package-lock-only` inside a Node 22 container; `npm ci --dry-run` still works on the Windows host.
+
+Still open, and needs the owner's homelab:
+
+- [ ] Run the container on the homelab and give it a stable address that stays up until 29 Jan 2027, reachable by judges **from the public internet**. A home connection normally needs a reverse proxy or tunnel with HTTPS and a domain; this is your decision and setup. A free, always-reachable address also matters for the rules ("free of charge and without any restriction", until the judging period ends).
+- [ ] Consider uptime risk (power, ISP, dynamic IP, router updates) for a 6-week judging window; keep a second copy ready (for example a free static host) if the homelab goes down.
+- [ ] Add security headers (CSP, `X-Content-Type-Options`, `Referrer-Policy`, frame restrictions) at the proxy or in `next.config.ts`, and test them in a browser first, because Next injects inline scripts. Do not ship a CSP that has not been run.
+- [ ] Run `node e2e/smoke.mjs https://<public url>` against the real address and keep the output in `docs/evidence/`.
+- [ ] Open the URL in a clean browser profile and on a phone, on mobile data (not your home wifi).
+
+Original checklist, still applicable:
+
+- [ ] Choose how the app is reached (see above).
+- [ ] Node 20.9+ for local builds (22 recommended, `.nvmrc` exists); the image uses Node 24.
+- [ ] Check that the font download at build time works wherever the image is built.
 - [ ] Confirm no login is needed, no cost, and the URL is stable until 29 Jan 2027. Do not rename the project or delete the deployment after submitting.
 - [ ] Judge instructions (also in the README): open the URL, press "load fictional demo data" in the empty-state banner or in The Keeper's Room, follow `docs/DEMO-SCRIPT.md`. To reset: Keeper's Room, Delete all my data. Data lives in the judge's own browser only.
 
