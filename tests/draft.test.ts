@@ -1,0 +1,83 @@
+import { describe, expect, it } from "vitest";
+import { buildDemoCommitments } from "@/lib/domain/demo-data";
+import {
+  choiceFromRule, draftFromCommitment, draftFromProposal, draftToCommitment, emptyDraft, ruleFromChoice,
+  type CommitmentDraft,
+} from "@/lib/domain/draft";
+import { dueLabel, recurrenceLabel } from "@/lib/domain/present";
+import { makeCommitment, NOW_ISO } from "./fixtures";
+
+const ctx = { userId: "user-a", timezone: "Africa/Johannesburg", nowIso: NOW_ISO, newId: () => "new-id" };
+const base = (over: Partial<CommitmentDraft> = {}): CommitmentDraft => ({
+  ...emptyDraft({ dueDate: "2026-11-25", currency: "ZAR" }), title: "Fibre", ...over,
+});
+
+describe("draft to commitment", () => {
+  it("builds a valid commitment with minor-unit money", () => {
+    const result = draftToCommitment(base({ amount: "899.50", repeat: "monthly", type: "bill" }), ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toMatchObject({ id: "new-id", userId: "user-a", status: "active", amountMinor: 89950, currency: "ZAR", sourceType: "manual" });
+      expect(result.value.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 25 });
+    }
+  });
+  it("omits the currency when there is no amount", () => {
+    const result = draftToCommitment(base(), ctx);
+    expect(result.ok && result.value.currency).toBeFalsy();
+  });
+  it("explains missing required fields", () => {
+    const result = draftToCommitment(base({ title: "  ", dueDate: "" }), ctx);
+    expect(result).toEqual({ ok: false, errors: ["Title is required", "Due date is required"] });
+  });
+  it("rejects negative and non-numeric amounts", () => {
+    expect(draftToCommitment(base({ amount: "-5" }), ctx).ok).toBe(false);
+    expect(draftToCommitment(base({ amount: "abc" }), ctx).ok).toBe(false);
+  });
+  it("keeps identity, history and unchanged recurrence when editing", () => {
+    const existing = makeCommitment({ id: "keep", createdAt: "2026-01-01T00:00:00.000Z", recurrence: { frequency: "monthly", interval: 1, dayOfMonth: 31 } });
+    const result = draftToCommitment({ ...draftFromCommitment(existing), title: "Renamed" }, { ...ctx, existing });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe("keep");
+      expect(result.value.createdAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(result.value.recurrence?.dayOfMonth).toBe(31);
+      expect(result.value.title).toBe("Renamed");
+    }
+  });
+  it("round-trips repeat choices", () => {
+    for (const choice of ["none", "weekly", "fortnightly", "monthly", "quarterly", "yearly"] as const) {
+      expect(choiceFromRule(ruleFromChoice(choice, "2026-11-25"))).toBe(choice);
+    }
+  });
+});
+
+describe("proposal to draft", () => {
+  it("uses the profile timezone for the calendar day and leaves a missing date empty", () => {
+    const late = { title: "x", category: "payment", dueAt: "2026-11-24T23:30:00.000Z", recurrence: "monthly" as const, amount: 899, currency: "ZAR", description: "" };
+    expect(draftFromProposal(late, "Africa/Johannesburg").dueDate).toBe("2026-11-25");
+    expect(draftFromProposal(late, "Africa/Johannesburg").type).toBe("bill");
+    expect(draftFromProposal({ ...late, dueAt: null }, "UTC").dueDate).toBe("");
+  });
+});
+
+describe("presentation", () => {
+  it("labels due dates", () => {
+    expect(dueLabel("2026-11-12", "2026-11-13")).toBe("1 day overdue");
+    expect(dueLabel("2026-11-13", "2026-11-13")).toBe("Due today");
+    expect(dueLabel("2026-11-14", "2026-11-13")).toBe("Due tomorrow");
+    expect(dueLabel("2026-11-16", "2026-11-13")).toBe("In 3 days");
+  });
+  it("labels recurrence", () => {
+    expect(recurrenceLabel({ frequency: "weekly", interval: 2 })).toBe("fortnightly");
+    expect(recurrenceLabel(undefined)).toBe("none");
+  });
+});
+
+describe("demo data", () => {
+  it("is fictional, valid and owned by the requested user", () => {
+    const items = buildDemoCommitments("user-a", "Africa/Johannesburg", NOW_ISO);
+    expect(items).toHaveLength(6);
+    expect(items.every((i) => i.userId === "user-a")).toBe(true);
+    expect(items.find((i) => i.id === "demo-fibre")?.amountMinor).toBe(89900);
+  });
+});

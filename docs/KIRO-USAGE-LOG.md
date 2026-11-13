@@ -10,6 +10,7 @@ Only work that was actually done with Kiro is listed. Configuration files existi
 | 2026-11-13 | Custom agents | Rewrote domain-engineer, experience-engineer, quality-guardian with explicit resources and permissions. Agents have not been run yet. | `.kiro/agents/*.md` |
 | 2026-11-13 | Hooks | Added `post-task-verify` (PostTaskExec: typecheck and tests). Existing typecheck-on-save kept. Neither has fired yet. | `.kiro/hooks/*.json` |
 | 2026-11-13 | Specs | Created product-foundation, commitment-domain, recurrence-engine, reminders-and-notifications, cinematic-experience, pwa-and-mobile, privacy-and-security, release-and-demo; rewrote intelligent-capture. No spec task has been executed yet. | `.kiro/specs/*` |
+| 2026-11-13 | Kiro IDE agent session (Vibe) | Prompt 2: added Vitest/fast-check/Zod, domain and storage modules with tests, migrated the UI to the repository, fixed lint errors. Specs referenced: product-foundation, commitment-domain (tasks 1.2-1.4, 2.1-2.6 verified; 2.7-2.12 implemented, unverified in browser). Spec tasks were not run through Kiro's task runner and the new hook did not fire. | commits (when made), test output, spec task notes |
 
 ## Not yet used
 MCP servers, Powers, Kiro Crew, spec task execution, hook runs, custom agent runs. Do not claim these until they happen.
