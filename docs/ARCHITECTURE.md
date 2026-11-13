@@ -61,3 +61,28 @@ NestJS API ───────── PostgreSQL (Prisma)
 5. Add the recurrence engine and background reminder worker.
 6. Add one structured extraction provider, then file and voice input.
 7. Add offline write queueing and conflict handling only after server sync semantics are defined.
+
+## Scope decision (owner, 13 November 2026)
+
+The submission build is **local-first**. The server side (NestJS API, PostgreSQL with Prisma, Redis and BullMQ, a background reminder worker, authentication) is built once the core product is finished, or after submission. Nothing in the demo, README or video may imply it exists before it does.
+
+### Repository layout against brief section 8.3
+
+The brief's layout is a target, and it allows keeping the current Next.js root if a monorepo move is too expensive. We keep the current layout for now.
+
+| Brief target | Today | Plan |
+|---|---|---|
+| `apps/web` | `app/`, `components/` at the root | Stays. Move only if the API work needs it. |
+| `apps/api` (NestJS) | none | Built after the core is finished or after submission. |
+| `packages/domain` | `lib/domain`, `lib/recurrence`, `lib/reminders`, `lib/capture` | Already free of React and browser code, so it can be moved into a package without a rewrite. |
+| `packages/contracts` | Zod schemas in `lib/domain/schema.ts` and `lib/capture/proposal.ts` | Split out when a second consumer (the API) exists. |
+| `prisma/`, `docker-compose.yml` | none | With the API. |
+| `docs/PRIVACY-NOTES.md`, `docs/RELEASE-CHECKLIST.md` | missing | Written under the `privacy-and-security` and `release-and-demo` specs. |
+| `LICENSE` | missing | Needs the owner's licence choice. |
+
+### Rules that keep the later server work cheap
+
+- Components talk to storage only through `CommitmentRepository` (`lib/storage/repository.ts`). A server-backed repository replaces the local one without touching the UI.
+- Domain code stays pure and framework-free.
+- Every repository call already takes a `userId`.
+- The brief's Must Have items that this build does not meet until the server exists: server-backed storage, a reminder path that works when the app is closed, and per-user accounts. They are listed in `docs/RELEASE-CHECKLIST.md` (to be created) as open items.

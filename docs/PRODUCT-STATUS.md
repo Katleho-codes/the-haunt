@@ -80,3 +80,13 @@ Audit defects fixed with regression tests: "for 3 weeks" no longer produces an a
 The reader does not invent dates: "expires in March" leaves the date empty and the form cannot be saved until one is chosen. It does work out some values (the next "25th", "tomorrow", an assumed year) and always flags them.
 
 Not built: any LLM or other external extraction, consent screens, file/OCR/voice capture (specs 5.9 to 5.13). The reader handles short English notes only; it does not handle other languages, times of day, or multiple commitments in one note.
+
+## Update 13 November 2026 (Prompt 6: cinematic experience)
+
+Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warning), `npm test` (12 files, 166 tests pass), production build (pass), `npm run e2e` (23 browser steps in Edge, all pass), `node e2e/contrast.mjs` (677 text elements, all at or above WCAG AA ratios), `node e2e/screenshots.mjs` (3 widths x 5 views: no horizontal overflow, no targets under 24px).
+
+Done: house mood (Calm / Watchful / Restless) with a text label and background shifts; motion setting that follows the device by default plus an in-app override; atmosphere intensity; separate ambience and interaction toggles, volume with a hard ceiling, audio created only after a user gesture and only when a toggle is on; completion dissolve with Undo; seal stamp on adding a reviewed capture; focus trap and focus return in the dialog; self-hosted fonts; contrast fixes (about 50 muted text colours raised); larger touch targets on small screens.
+
+Bugs found by the new checks and fixed: a hydration mismatch in the prerendered page (the date was baked in at build time); text colours below 4.5:1 across the app; touch targets of 13 to 19px on mobile; the completion ghost row duplicating selectors.
+
+Not done or not verified: red usage was not reviewed line by line against the steering (6.8); pendulum and crypt motifs (6.12); only Microsoft Edge was tested, no screen reader, no real device, no Safari or Firefox; whether the audio actually sounds right or is comfortably quiet was not heard by anyone (only gain values are tested); the contrast audit approximates gradients. Two e2e runs crashed with an uncaptured Node error and passed on every later rerun (6 runs); the cause is unknown.

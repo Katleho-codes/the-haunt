@@ -21,3 +21,6 @@ Kiro IDE agent session (Vibe): in-app reminders (plan, reconcile, states, notifi
 
 ### Addendum, 13 November 2026 (Prompt 5)
 Kiro IDE agent session (Vibe): rebuilt text capture as a validated proposal/review workflow (`lib/capture/`), fixed the two parser defects from the audit with regression tests, added example and property tests, and extended the browser smoke test with two capture steps. Spec intelligent-capture: tasks 5.1-5.8 verified; 5.9-5.13 not started. Spec task runner and hooks were not used. Evidence: `tests/capture.test.ts`, `e2e/smoke.mjs`.
+
+### Addendum, 13 November 2026 (Prompt 6)
+Kiro IDE agent session (Vibe): cinematic-experience work (house mood, motion and intensity settings, audio levels and gating, completion and seal feedback, focus handling, self-hosted fonts, contrast and touch-target fixes). Added `e2e/contrast.mjs` and `e2e/screenshots.mjs` and extended `e2e/smoke.mjs`. Spec cinematic-experience: 6.1 to 6.7, 6.9 to 6.11 done; 6.8 and 6.12 open. Spec task runner and hooks were not used. Evidence: `tests/experience.test.ts`, `e2e/*.mjs`, `docs/evidence/screenshots/`.

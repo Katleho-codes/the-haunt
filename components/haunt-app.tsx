@@ -28,6 +28,9 @@ import { reconcileReminders } from "@/lib/reminders/reconcile";
 import { dismissReminder, evaluateReminders, isUnseen, isVisible, markShown, snoozeReminder } from "@/lib/reminders/state";
 import { NotificationCentre, type SnoozeChoice } from "@/components/notification-centre";
 import { addDays } from "@/lib/domain/dates";
+import { ambienceGain, effectGain, GAIN_CEILING } from "@/lib/audio/levels";
+import { computeHouseState } from "@/lib/domain/house-state";
+import { shouldReduceMotion } from "@/lib/domain/motion";
 import { LocalStorageRepository } from "@/lib/storage/local-storage-repository";
 import type { LoadStatus } from "@/lib/storage/repository";
 
@@ -48,31 +51,34 @@ const navItems: { id: ViewId; label: string; subtitle: string; icon: typeof Hous
 function uid() { return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`; }
 function classNames(...values: Array<string | false | null | undefined>) { return values.filter(Boolean).join(" "); }
 
-function useHauntSound(storedSettings: Settings) {
-  // Stored volume is 0-1; the synthesis below was tuned against a 0-100 scale.
-  const settings = { ...storedSettings, volume: storedSettings.volume * 100 };
+/**
+ * Synthesized sound. Nothing is created until the user has interacted with the page, and nothing plays unless a
+ * sound setting is on. Everything goes through one master gain node, and each source is capped by lib/audio/levels.
+ */
+function useHauntSound(settings: Settings, activated: boolean) {
   const contextRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
-  const gainRef = useRef<GainNode | null>(null);
+  const masterRef = useRef<GainNode | null>(null);
   const ensureContext = useCallback(() => {
+    if (!activated) return null;
     const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return null;
-    if (!contextRef.current) contextRef.current = new AudioContextCtor();
+    if (!contextRef.current) {
+      const context = new AudioContextCtor();
+      const master = context.createGain();
+      master.gain.value = 1;
+      master.connect(context.destination);
+      contextRef.current = context;
+      masterRef.current = master;
+    }
     if (contextRef.current.state === "suspended") void contextRef.current.resume();
     return contextRef.current;
-  }, []);
-  const stopAmbience = useCallback(() => {
-    if (gainRef.current && contextRef.current) {
-      const gain = gainRef.current;
-      gain.gain.cancelScheduledValues(contextRef.current.currentTime);
-      gain.gain.setTargetAtTime(0, contextRef.current.currentTime, 0.35);
-      window.setTimeout(() => { try { oscillatorRef.current?.stop(); } catch { /* already stopped */ } oscillatorRef.current = null; gainRef.current = null; }, 1300);
-    }
-  }, []);
+  }, [activated]);
+
   useEffect(() => {
-    if (!settings.ambience) { stopAmbience(); return; }
+    if (!settings.ambience) return;
     const context = ensureContext();
-    if (!context || oscillatorRef.current) return;
+    const master = masterRef.current;
+    if (!context || !master) return;
     const oscillator = context.createOscillator();
     const sub = context.createOscillator();
     const gain = context.createGain();
@@ -81,35 +87,42 @@ function useHauntSound(storedSettings: Settings) {
     oscillator.frequency.value = 48;
     sub.type = "triangle";
     sub.frequency.value = 53;
-    gain.gain.value = Math.max(0.001, settings.volume / 1000);
-    subGain.gain.value = 0.004;
-    oscillator.connect(gain).connect(context.destination);
-    sub.connect(subGain).connect(context.destination);
-    oscillator.start(); sub.start();
-    oscillatorRef.current = oscillator; gainRef.current = gain;
-    return () => { try { oscillator.stop(); sub.stop(); } catch { /* ignored */ } oscillatorRef.current = null; gainRef.current = null; };
-  }, [settings.ambience, settings.volume, ensureContext, stopAmbience]);
+    gain.gain.value = ambienceGain(settings.volume);
+    subGain.gain.value = Math.min(0.004, GAIN_CEILING);
+    oscillator.connect(gain).connect(master);
+    sub.connect(subGain).connect(master);
+    oscillator.start();
+    sub.start();
+    return () => {
+      const now = context.currentTime;
+      gain.gain.setTargetAtTime(0, now, 0.15);
+      subGain.gain.setTargetAtTime(0, now, 0.15);
+      window.setTimeout(() => { try { oscillator.stop(); sub.stop(); } catch { /* already stopped */ } }, 900);
+    };
+  }, [settings.ambience, settings.volume, ensureContext]);
+
   const chime = useCallback((kind: "complete" | "add" | "warning" = "add") => {
     if (!settings.effects) return;
     const context = ensureContext();
-    if (!context) return;
+    const master = masterRef.current;
+    if (!context || !master) return;
     const frequencies = kind === "complete" ? [523.25, 659.25, 783.99] : kind === "warning" ? [110, 103.83] : [392, 523.25];
     frequencies.forEach((frequency, index) => {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
-      oscillator.type = kind === "warning" ? "sine" : "sine";
-      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.08);
-      gain.gain.setValueAtTime(0.0001, context.currentTime + index * 0.08);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.015, settings.volume / 3000), context.currentTime + index * 0.08 + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + index * 0.08 + (kind === "warning" ? 0.55 : 0.32));
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(context.currentTime + index * 0.08);
-      oscillator.stop(context.currentTime + index * 0.08 + 0.62);
+      const start = context.currentTime + index * 0.08;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(effectGain(settings.volume), start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + (kind === "warning" ? 0.55 : 0.32));
+      oscillator.connect(gain).connect(master);
+      oscillator.start(start);
+      oscillator.stop(start + 0.62);
     });
   }, [ensureContext, settings.effects, settings.volume]);
   return { chime };
 }
-
 export default function HauntApp() {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
@@ -125,11 +138,14 @@ export default function HauntApp() {
   const [proposal, setProposal] = useState<ProposalState | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>({ kind: "empty" });
   const [now, setNow] = useState(() => new Date());
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; undoId?: string } | null>(null);
+  const [seal, setSeal] = useState<number | null>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const { chime } = useHauntSound(settings);
+  const [activated, setActivated] = useState(false);
+  const { chime } = useHauntSound(settings, activated);
 
   const repository = useMemo(
     () => (typeof window === "undefined" ? null : new LocalStorageRepository({ storage: window.localStorage, timezone: browserTimeZone() })),
@@ -164,15 +180,23 @@ export default function HauntApp() {
   useEffect(() => {
     if (!hydrated || !repository) return;
     void repository.saveSettings(LOCAL_USER, settings);
-    document.documentElement.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
+    document.documentElement.dataset.motion = settings.motion;
+    document.documentElement.dataset.intensity = settings.intensity;
   }, [settings, hydrated, repository]);
+  // Audio may only start after the person has interacted with the page.
+  useEffect(() => {
+    const activate = () => setActivated(true);
+    window.addEventListener("pointerdown", activate, { once: true });
+    window.addEventListener("keydown", activate, { once: true });
+    return () => { window.removeEventListener("pointerdown", activate); window.removeEventListener("keydown", activate); };
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 3200);
+    const timer = window.setTimeout(() => setToast(null), toast.undoId ? 8000 : 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -208,6 +232,7 @@ export default function HauntApp() {
   const recurring = useMemo(() => filterCommitments(active, { recurring: true }).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [active]);
   const upcomingTotals = useMemo(() => sumByCurrency([...dueToday, ...upcoming]), [dueToday, upcoming]);
   const restlessCount = overdue.length;
+  const mood = useMemo(() => computeHouseState(commitments, today), [commitments, today]);
   const nextDue = useMemo(() => [...active].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0], [active]);
   const currentNav = navItems.find((item) => item.id === view) ?? navItems[0];
   const filtered = useMemo(() => {
@@ -215,7 +240,25 @@ export default function HauntApp() {
     return filterCommitments(source, { text: searchText }).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.title.localeCompare(b.title));
   }, [active, completed, recurring, searchText, view]);
 
-  function notify(message: string) { setToast(message); }
+  function notify(message: string, undoId?: string) { setToast({ message, undoId }); }
+  const reduceMotionNow = () => shouldReduceMotion(settings.motion, typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  // A short spectral fade of the row that was just finished. It is a copy drawn over the list, so the data change
+  // is immediate and nothing depends on timers. Skipped entirely when motion is reduced.
+  function dissolveRow(id: string) {
+    if (reduceMotionNow()) return;
+    const source = document.querySelector<HTMLElement>(`[data-commitment-id="${CSS.escape(id)}"]`);
+    if (!source) return;
+    const rect = source.getBoundingClientRect();
+    const ghost = source.cloneNode(true) as HTMLElement;
+    ghost.classList.add("row-ghost");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.setAttribute("inert", "");
+    ghost.removeAttribute("data-commitment-id");
+    Object.assign(ghost.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    ghost.addEventListener("animationend", () => ghost.remove(), { once: true });
+    document.body.appendChild(ghost);
+  }
+  function stampSeal() { if (!reduceMotionNow()) setSeal((n) => (n ?? 0) + 1); }
   // Reminders only become "shown" once the centre has listed them: new ones read NEW while it is open
   // and are recorded as shown when it closes.
   function openNotifications() { setNotificationsOpen(true); }
@@ -226,6 +269,7 @@ export default function HauntApp() {
       return markShown(settled, settled.filter(isUnseen).map((item) => item.id), nowDate.toISOString());
     });
     setNotificationsOpen(false);
+    bellRef.current?.focus();
   }
   function snoozeFromCentre(id: string, choice: SnoozeChoice) {
     const until = choice === "hour"
@@ -269,7 +313,8 @@ export default function HauntApp() {
     } else {
       setCommitments((items) => [saved, ...items]);
       chime("add");
-      notify("A new commitment has entered the house.");
+      stampSeal();
+      notify(proposal ? "Sealed. The commitment has been added to the ledger." : "A new commitment has entered the house.");
     }
     setModalOpen(false); setEditing(null); setProposal(null); setQuickText("");
     return [];
@@ -280,15 +325,17 @@ export default function HauntApp() {
     if (item.recurrence) {
       const result = completeOccurrence(item, occurrences, nowIso);
       if (!result.ok) { notify(result.reason); return; }
+      dissolveRow(item.id);
       setCommitments((items) => items.map((entry) => entry.id === item.id ? result.commitment : entry));
       setOccurrences(result.occurrences);
       chime("complete");
-      notify(result.next ? `Laid to rest. Next: ${formatDateOnly(result.next, settings.locale, { day: "numeric", month: "long" })}.` : "Laid to rest. The series has ended.");
+      notify(result.next ? `Laid to rest. Next: ${formatDateOnly(result.next, settings.locale, { day: "numeric", month: "long" })}.` : "Laid to rest. The series has ended.", result.occurrences[result.occurrences.length - 1].id);
       return;
     }
+    dissolveRow(item.id);
     setCommitments((items) => items.map((entry) => entry.id === item.id ? completeItem(entry, nowIso) : entry));
     chime("complete");
-    notify("Laid to rest. Well done.");
+    notify("Laid to rest. Well done.", item.id);
   }
   function restoreCommitment(item: Commitment) {
     const entry = occurrences.find((o) => o.id === item.id);
@@ -356,7 +403,7 @@ export default function HauntApp() {
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-house={mood.state}>
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
       <div className="grain" aria-hidden="true" />
@@ -378,10 +425,10 @@ export default function HauntApp() {
         </nav>
         <div className="sidebar-spacer" />
         <div className="house-status-card">
-          <div className="status-top"><span className="status-dot"/><span>HOUSE STATUS</span><span className="status-live">LIVE</span></div>
-          <div className="status-title">{restlessCount === 0 ? "Quiet... for now." : `${restlessCount} restless ${restlessCount === 1 ? "spirit" : "spirits"}.`}</div>
-          <div className="status-description">{restlessCount === 0 ? "Nothing overdue. Keep it that way." : "Some commitments are waiting to be laid to rest."}</div>
-          <div className="status-meter"><span style={{ width: `${Math.min(100, restlessCount * 22)}%` }}/></div>
+          <div className="status-top"><span className="status-dot"/><span>HOUSE STATUS</span><span className="status-live">{mood.label}</span></div>
+          <div className="status-title">{mood.state === "calm" ? "Quiet... for now." : mood.state === "watchful" ? "The house is watching." : `${mood.overdue} restless ${mood.overdue === 1 ? "spirit" : "spirits"}.`}</div>
+          <div className="status-description">{mood.description}</div>
+          <div className={classNames("status-meter", `status-meter-${mood.state}`)}><span style={{ width: `${mood.state === "restless" ? Math.min(100, mood.overdue * 22) : mood.state === "watchful" ? Math.min(100, mood.dueSoon * 14) : 6}%` }}/></div>
         </div>
         <div className="sidebar-bottom">
           <div className="sidebar-user-avatar">K</div>
@@ -397,7 +444,7 @@ export default function HauntApp() {
           <div className="breadcrumb"><span>THE HAUNT</span><ChevronRight size={13}/><strong>{currentNav.label.toUpperCase()}</strong></div>
           <div className="topbar-actions">
             <button className="topbar-search" onClick={() => setSearchOpen((open) => !open)}><Search size={15}/><span>Search the house</span><kbd>⌘ K</kbd></button>
-            <button className="icon-button bell-button" onClick={() => (notificationsOpen ? closeNotifications() : openNotifications())} aria-label={`Reminders: ${unseenReminders} new, ${visibleReminders.length} in total`} aria-expanded={notificationsOpen} title="Reminders"><Bell size={17}/>{(unseenReminders > 0 || visibleReminders.length > 0) && <em className={classNames("bell-count", unseenReminders > 0 && "bell-count-new")}>{unseenReminders > 0 ? unseenReminders : visibleReminders.length}</em>}</button>
+            <button ref={bellRef} className="icon-button bell-button" onClick={() => (notificationsOpen ? closeNotifications() : openNotifications())} aria-label={`Reminders: ${unseenReminders} new, ${visibleReminders.length} in total`} aria-expanded={notificationsOpen} title="Reminders"><Bell size={17}/>{(unseenReminders > 0 || visibleReminders.length > 0) && <em className={classNames("bell-count", unseenReminders > 0 && "bell-count-new")}>{unseenReminders > 0 ? unseenReminders : visibleReminders.length}</em>}</button>
             <button className="icon-button sound-button" onClick={() => updateSettings({ effects: !settings.effects })} aria-label={settings.effects ? "Mute sound effects" : "Enable sound effects"} title="Sound effects"><span className={classNames("sound-indicator", settings.effects && "sound-indicator-on")}/>{settings.effects ? <Volume2 size={17}/> : <VolumeX size={17}/>}</button>
             <div className="topbar-avatar">K</div>
           </div>
@@ -413,7 +460,7 @@ export default function HauntApp() {
           {view === "today" && <>
             <section className="hero-panel">
               <div className="hero-copy">
-                <div className="eyebrow"><span className="eyebrow-line"/> {new Intl.DateTimeFormat("en-ZA", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).format(new Date()).toUpperCase()} <span className="eyebrow-line"/></div>
+                <div className="eyebrow"><span className="eyebrow-line"/> {hydrated ? new Intl.DateTimeFormat(settings.locale, { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: settings.timezone }).format(now).toUpperCase() : ""} <span className="eyebrow-line"/></div>
                 <h1>The house<br/><em>remembers</em><br/>everything<span className="title-period">.</span></h1>
                 <p className="hero-subtitle">Good evening, Keeper. There are a few loose ends<br className="desktop-only"/> wandering the halls tonight.</p>
                 <button className="hero-cta" onClick={openCreate}><Plus size={15}/> Capture a commitment <span>↗</span></button>
@@ -425,7 +472,7 @@ export default function HauntApp() {
                 <div className="hero-silhouette"/>
                 <div className="firefly firefly-one"/><div className="firefly firefly-two"/><div className="firefly firefly-three"/>
               </div>
-              <div className="hero-bottom-note"><Moon size={12}/> THE VEIL IS THIN TONIGHT <span>·</span> YOUR LEDGER IS OPEN</div>
+              <div className="hero-bottom-note"><Moon size={12}/> THE VEIL IS THIN TONIGHT <span aria-hidden="true">·</span> YOUR LEDGER IS OPEN</div>
             </section>
 
             <section className="stat-grid" aria-label="Commitment overview">
@@ -453,8 +500,8 @@ export default function HauntApp() {
                   <div className="capture-input-wrap"><textarea value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder={'“Fibre is due on the 25th every month...”'} rows={3}/><div className="capture-input-footer"><span><Sparkles size={12}/> QUICK CAPTURE</span><button onClick={handleQuickCapture} disabled={!quickText.trim()} aria-label="Interpret quick capture"><ArrowUpRight size={16}/></button></div></div>
                   <div className="capture-methods"><span><FileText size={13}/> Paste text</span><span><Mic size={13}/> Voice soon</span><span><Paperclip size={13}/> Files soon</span></div>
                 </div>
-                <div className="moon-card"><div className="moon-card-top"><span>THE NIGHT WATCH</span><CloudMoon size={16}/></div><div className="moon-phase"><div className="phase-moon"/><div><strong>{new Intl.DateTimeFormat("en", { weekday: "long" }).format(new Date())}</strong><span>THE HOUSE IS {restlessCount === 0 ? "AT REST" : "RESTLESS"}</span></div></div><div className="moon-card-rule"/><div className="moon-card-bottom"><span>Next commitment</span><strong>{nextDue ? dueLabel(nextDue.dueDate, today, settings.locale) : "None in sight"}</strong></div></div>
-                <div className="whisper-card"><div className="whisper-mark">“</div><p>What is remembered<br/>cannot return to haunt you.</p><span>— A NOTE FROM THE HOUSE</span></div>
+                <div className="moon-card"><div className="moon-card-top"><span>THE NIGHT WATCH</span><CloudMoon size={16}/></div><div className="moon-phase"><div className="phase-moon"/><div><strong>{hydrated ? new Intl.DateTimeFormat(settings.locale, { weekday: "long", timeZone: settings.timezone }).format(now) : ""}</strong><span>THE HOUSE IS {mood.label}</span></div></div><div className="moon-card-rule"/><div className="moon-card-bottom"><span>Next commitment</span><strong>{nextDue ? dueLabel(nextDue.dueDate, today, settings.locale) : "None in sight"}</strong></div></div>
+                <div className="whisper-card"><div className="whisper-mark" aria-hidden="true">“</div><p>What is remembered<br/>cannot return to haunt you.</p><span>— A NOTE FROM THE HOUSE</span></div>
               </aside>
             </section>
           </>}
@@ -472,7 +519,8 @@ export default function HauntApp() {
       <button className="floating-add" onClick={openCreate} aria-label="Add commitment"><Plus size={21}/></button>
 
       {modalOpen && <CommitmentModal initial={editing} proposal={proposal} defaults={{ dueDate: addDays(today, 1), currency: settings.currency, reminders: settings.defaultReminderOffsets }} onClose={() => { setModalOpen(false); setEditing(null); setProposal(null); }} onSave={saveCommitment}/>}
-      {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-icon"><Check size={14}/></span>{toast}</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-icon"><Check size={14}/></span>{toast.message}{toast.undoId && <button className="toast-action" onClick={() => { const target = completed.find((entry) => entry.id === toast.undoId); setToast(null); if (target) restoreCommitment(target); }}>Undo</button>}</div>}
+      {seal !== null && <div key={seal} className="seal-stamp" aria-hidden="true" onAnimationEnd={() => setSeal(null)}><WandSparkles size={26}/></div>}
       {!hydrated && <div className="boot-screen"><div className="boot-mark"><Ghost size={28}/></div><span>THE HAUNT</span><i>THE HOUSE IS WAKING</i></div>}
     </main>
   );
@@ -485,10 +533,10 @@ function StatCard({ label, value, note, icon, warning, compact }: { label: strin
 function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchive, today, locale, overdue, completed, nextDates: upcomingDates }: { item: Commitment; onComplete: (item: Commitment) => void; onEdit: (item: Commitment) => void; onDelete: (item: Commitment) => void; onRestore: (item: Commitment) => void; onArchive: (item: Commitment) => void; today: string; locale: string; overdue?: boolean; completed?: boolean; nextDates?: string[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const categoryIcon = item.type === "bill" ? <CircleDollarSign size={16}/> : item.type === "subscription" ? <RotateCcw size={16}/> : item.type === "appointment" ? <CalendarDays size={16}/> : item.type === "renewal" ? <Shield size={16}/> : item.type === "household" ? <House size={16}/> : <FileText size={16}/>;
-  return <article className={classNames("commitment-row", overdue && "commitment-row-overdue", completed && "commitment-row-completed", menuOpen && "commitment-row-menu-open")}>
+  return <article data-commitment-id={item.id} className={classNames("commitment-row", overdue && "commitment-row-overdue", completed && "commitment-row-completed", menuOpen && "commitment-row-menu-open")}>
     <button className={classNames("complete-control", completed && "complete-control-done")} onClick={() => completed ? undefined : onComplete(item)} disabled={completed} aria-label={completed ? "Completed" : "Mark complete"}>{completed ? <Check size={14}/> : <span/>}</button>
     <div className="commitment-type-icon">{categoryIcon}</div>
-    <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i>·</i><span>{item.description || "No additional details"}</span></div>{upcomingDates && upcomingDates.length > 0 && <div className="commitment-next">Next: {upcomingDates.map((date) => formatDateOnly(date, locale, { day: "numeric", month: "short" })).join(" · ")}</div>}</div>
+    <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i aria-hidden="true">·</i><span>{item.description || "No additional details"}</span></div>{upcomingDates && upcomingDates.length > 0 && <div className="commitment-next">Next: {upcomingDates.map((date) => formatDateOnly(date, locale, { day: "numeric", month: "short" })).join(" · ")}</div>}</div>
     <div className="commitment-due"><strong className={classNames(overdue && "danger-text")}>{dueLabel(item.dueDate, today, locale)}</strong><span>{formatDateOnly(item.dueDate, locale, { day: "2-digit", month: "short", year: "numeric" })}</span></div>
     <div className="commitment-amount">{formatMoney(item.amountMinor, item.currency, locale)}</div>
     <div className="row-menu-wrap"><button className="icon-button tiny row-more" aria-label="More actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close actions" onClick={() => setMenuOpen(false)}/><div className="row-menu">{!completed && <button onClick={() => { onComplete(item); setMenuOpen(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button onClick={() => { onEdit(item); setMenuOpen(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && <button onClick={() => { onArchive(item); setMenuOpen(false); }}><Archive size={14}/> Archive</button>}{completed && <button onClick={() => { onRestore(item); setMenuOpen(false); }}><RotateCcw size={14}/> Restore</button>}<button className="danger-menu" onClick={() => { onDelete(item); setMenuOpen(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>
@@ -508,6 +556,19 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
 }) {
   const [draft, setDraft] = useState<CommitmentDraft>(() => initial ? draftFromCommitment(initial) : proposal ? proposal.draft : emptyDraft(defaults));
   const [errors, setErrors] = useState<string[]>([]);
+  const [opener] = useState(() => (typeof document === "undefined" ? null : document.activeElement));
+  const dialogRef = useRef<HTMLElement>(null);
+  // Return focus to whatever opened the dialog when it closes.
+  useEffect(() => () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); }, [opener]);
+  function trapTab(event: React.KeyboardEvent) {
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')].filter((node) => node.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
   const [showAdvanced, setShowAdvanced] = useState(Boolean(proposal));
   const isProposal = Boolean(proposal && !initial);
   const { title, description, dueDate, amount, currency, reminderOffsetsDays: reminders } = draft;
@@ -535,7 +596,7 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
     setErrors(onSave(draft));
   }  function toggleReminder(value: number) { set({ reminderOffsetsDays: reminders.includes(value) ? reminders.filter((entry) => entry !== value) : [...reminders, value].sort((a, b) => b - a) }); }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="commitment-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="commitment-modal" ref={dialogRef} onKeyDown={trapTab} role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div className="modal-topline"><span><span className="modal-seal"><WandSparkles size={14}/></span>{isProposal ? "THE SÉANCE ROOM / REVIEW" : initial ? "THE ARCHIVE / EDIT" : "THE ARCHIVE / NEW RECORD"}</span><button className="icon-button" onClick={onClose} aria-label="Close modal"><X size={18}/></button></div>
     <h2 id="modal-title">{isProposal ? <>Review the <em>omen</em>.</> : initial ? <>Rewrite the <em>record</em>.</> : <>What must be <em>remembered</em>?</>}</h2>
     <p className="modal-intro">{isProposal ? "We've interpreted your note. Check every detail before it enters the ledger." : "Give this loose end a name, a date and a place in the ledger."}</p>
@@ -560,7 +621,8 @@ function SettingsView({ settings, updateSettings, exportData, total, loadDemoDat
       <div className="setting-range"><div><strong>Sound intensity</strong><span>Keep the volume comfortable.</span></div><div className="range-control"><input type="range" min="0" max="70" aria-label="Sound intensity" value={Math.round(settings.volume * 100)} onChange={(event) => updateSettings({ volume: Number(event.target.value) / 100 })}/><b>{Math.round(settings.volume * 100)}%</b></div></div>
     </section>
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><SunMoon size={17}/></span><div><h3>Visual experience</h3><p>Keep the darkness comfortable and accessible.</p></div></div>
-      <SettingToggle title="Reduced motion" description="Reduce environmental movement and animated transitions." checked={settings.reduceMotion} onChange={(value) => updateSettings({ reduceMotion: value })}/>
+      <div className="setting-range"><div><strong>Motion</strong><span>Follow your device, or choose. Reduced motion stops drifting fog and animated transitions.</span></div><select className="field-control settings-select" aria-label="Motion" value={settings.motion} onChange={(event) => updateSettings({ motion: event.target.value as Settings["motion"] })}><option value="system">Follow my device</option><option value="reduced">Reduced</option><option value="full">Full</option></select></div>
+      <div className="setting-range"><div><strong>Atmosphere</strong><span>How much fog, grain and drifting light is drawn.</span></div><select className="field-control settings-select" aria-label="Atmosphere" value={settings.intensity} onChange={(event) => updateSettings({ intensity: event.target.value as Settings["intensity"] })}><option value="full">Full haunted</option><option value="restrained">Restrained</option><option value="low">Low (no fog or grain)</option></select></div>
       <div className="setting-range"><div><strong>Display currency</strong><span>Used for commitment amount summaries.</span></div><select className="field-control settings-select" value={settings.currency} onChange={(event) => updateSettings({ currency: event.target.value })}><option>ZAR</option><option>USD</option><option>GBP</option><option>EUR</option></select></div>
     </section>
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><Bell size={17}/></span><div><h3>Reminders</h3><p>In-app only. They appear while THE HAUNT is open.</p></div></div>

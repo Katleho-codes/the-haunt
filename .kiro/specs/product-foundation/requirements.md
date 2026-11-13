@@ -2,8 +2,8 @@
 
 Supersedes the shell and housekeeping parts of `core-experience`.
 
-## Assumption awaiting owner approval
-The MVP is local-first (browser storage behind a repository interface) with honest in-app reminders. A server-backed MVP is a separate, later decision. See `docs/IMPLEMENTATION-AUDIT.md` section 10.
+## Owner decision (13 November 2026)
+The submission build is local-first (browser storage behind a repository interface) with honest in-app reminders. The server side (API, database, background reminder worker) is built after the core is finished, or after submission, and stays out of anything judges see until it is real. See `docs/ARCHITECTURE.md`, section "Scope decision".
 
 ## Goal
 Make the repository trustworthy and releasable: tracked in git, licensed, passing its own checks, with a navigable app shell.

@@ -25,11 +25,19 @@ const problems = [];
 page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
 page.on("console", (message) => { if (message.type() === "error") problems.push(`console: ${message.text()} ${message.location().url}`); });
 
+// Count AudioContexts and external requests so we can prove sound is opt-in and fonts are self-hosted.
+await page.addInitScript(() => {
+  window.__audioContexts = 0;
+  const Original = window.AudioContext;
+  if (Original) window.AudioContext = class extends Original { constructor(...args) { super(...args); window.__audioContexts += 1; } };
+});
+const externalRequests = [];
+page.on("request", (request) => { if (!request.url().startsWith(base) && !request.url().startsWith("data:") && !request.url().startsWith("blob:")) externalRequests.push(request.url()); });
 await page.clock.install({ time: new Date("2026-11-13T08:00:00+02:00") });
 await page.goto(base);
 await page.waitForSelector(".boot-screen", { state: "detached", timeout: 10000 });
 
-const row = (title) => page.locator(".commitment-row", { has: page.locator(".commitment-title", { hasText: title }) });
+const row = (title) => page.locator(".commitment-list .commitment-row", { has: page.locator(".commitment-title", { hasText: title }) });
 const goto = async (label) => { await page.locator(".nav-item", { hasText: label }).click(); };
 
 await step("fresh start shows an empty ledger with no auto-loaded demo data", async () => {
@@ -41,6 +49,11 @@ await step("demo data loads on request", async () => {
   await goto("The Archive");
   await row("Fibre account").waitFor({ timeout: 3000 });
   expect((await page.locator(".commitment-row").count()) === 6, "expected 6 demo records");
+});
+
+await step("the house starts calm and says so in text", async () => {
+  expect((await page.locator(".app-shell").getAttribute("data-house")) === "calm", "expected data-house=calm");
+  expect(/CALM/.test(await page.locator(".house-status-card").innerText()), "house status text should read CALM");
 });
 
 await step("data survives a reload", async () => {
@@ -119,9 +132,22 @@ await step("the latest completion can be undone from The Crypt", async () => {
   expect((await row("Fibre account").innerText()).includes("Due in") || (await row("Fibre account").innerText()).includes("Nov"), "fibre did not return to November");
 });
 
+await step("completing a one-off shows a dissolve, a text message and a working Undo", async () => {
+  await goto("The Archive");
+  await row("Dentist appointment").locator(".complete-control").click();
+  await page.locator(".row-ghost").first().waitFor({ timeout: 2000 });
+  const toast = page.locator(".toast", { hasText: "Laid to rest" });
+  await toast.waitFor({ timeout: 2000 });
+  expect((await row("Dentist appointment").count()) === 0, "the finished row should leave the Archive");
+  await toast.getByRole("button", { name: "Undo" }).click();
+  await row("Dentist appointment").waitFor({ timeout: 2000 });
+});
+
 await step("a reminder becomes due only when its time arrives", async () => {
   expect(/0 new/.test(await page.locator(".bell-button").getAttribute("aria-label")), "bell should start with 0 new");
   await page.clock.fastForward(9 * 86_400_000); // 22 Nov 2026 08:00 SAST, an hour before the fibre reminder
+  await page.waitForFunction(() => document.querySelector(".app-shell")?.getAttribute("data-house") === "restless", null, { timeout: 5000 });
+  expect(/RESTLESS/.test(await page.locator(".house-status-card").innerText()), "house status text should read RESTLESS");
   await page.locator(".bell-button").click();
   let text = await page.locator(".notification-centre").innerText();
   expect(/Dentist appointment/.test(text), "the earlier dentist reminder should be due by now");
@@ -191,14 +217,70 @@ await step("no horizontal scroll on any view at 390px", async () => {
   await page.setViewportSize({ width: 1280, height: 900 });
 });
 
-await step("sound is off by default", async () => {
+await step("sound is off by default and no audio is created until it is turned on", async () => {
   await goto("Keeper's Room");
   const switches = page.locator('[role="switch"]');
   const states = await switches.evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-checked")));
   expect(states[0] === "false" && states[1] === "false", `sound toggles should start off, got ${states.join(",")}`);
+  expect((await page.evaluate(() => window.__audioContexts)) === 0, "an AudioContext was created while sound was off");
+  await switches.nth(0).click(); // ambient sound: a user gesture
+  await page.waitForFunction(() => window.__audioContexts === 1, null, { timeout: 3000 });
+  await switches.nth(0).click();
+});
+
+await step("motion and atmosphere settings apply immediately and persist", async () => {
+  await page.getByLabel("Motion", { exact: true }).selectOption("reduced");
+  expect((await page.evaluate(() => document.documentElement.dataset.motion)) === "reduced", "data-motion not applied");
+  const duration = await page.evaluate(() => getComputedStyle(document.querySelector(".boot-mark, .hero-fog, .toast, .status-dot") ?? document.body).animationDuration);
+  expect(duration === "0s" || duration === "1e-05s" || /^0(\.0+)?s$/.test(duration) || parseFloat(duration) < 0.01, `animation not suppressed: ${duration}`);
+  await page.getByLabel("Atmosphere", { exact: true }).selectOption("low");
+  expect((await page.evaluate(() => document.documentElement.dataset.intensity)) === "low", "data-intensity not applied");
+  await page.reload();
+  await page.waitForSelector(".boot-screen", { state: "detached" });
+  expect((await page.evaluate(() => document.documentElement.dataset.motion)) === "reduced", "motion setting did not persist");
+  await goto("Keeper's Room");
+  await page.getByLabel("Motion", { exact: true }).selectOption("system");
+  await page.getByLabel("Atmosphere", { exact: true }).selectOption("full");
+});
+
+await step("with the device set to reduced motion, effects are skipped but the result is still announced", async () => {
+  const quiet = await browser.newContext({ timezoneId: "Africa/Johannesburg", locale: "en-ZA", reducedMotion: "reduce", viewport: { width: 1280, height: 900 } });
+  const q = await quiet.newPage();
+  await q.goto(base);
+  await q.waitForSelector(".boot-screen", { state: "detached" });
+  await q.getByRole("button", { name: "load fictional demo data" }).click();
+  await q.locator(".nav-item", { hasText: "The Archive" }).click();
+  const target = q.locator(".commitment-row", { has: q.locator(".commitment-title", { hasText: "Dentist appointment" }) });
+  await target.locator(".complete-control").click();
+  await q.locator(".toast", { hasText: "Laid to rest" }).waitFor({ timeout: 2000 });
+  expect((await q.locator(".row-ghost").count()) === 0, "dissolve ghost should not be drawn under reduced motion");
+  const fog = await q.evaluate(() => parseFloat(getComputedStyle(document.querySelector(".hero-fog") ?? document.body).animationDuration));
+  expect(fog < 0.01, `fog animation should be suppressed by the device setting, got ${fog}s`);
+  await quiet.close();
+});
+
+await step("keyboard: the dialog traps focus, Escape closes it and focus returns to the opener", async () => {
+  await goto("The Hall");
+  await page.locator(".floating-add").focus();
+  await page.keyboard.press("Enter");
+  await page.locator(".commitment-modal").waitFor();
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest(".commitment-modal")), `focus escaped the dialog after ${i + 1} Tab presses`);
+  }
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest(".commitment-modal")), "focus escaped on Shift+Tab");
+  await page.keyboard.press("Escape");
+  await page.locator(".commitment-modal").waitFor({ state: "detached" });
+  expect(await page.evaluate(() => document.activeElement?.classList.contains("floating-add")), "focus did not return to the Add button");
+});
+
+await step("fonts are self-hosted: no request left the site", async () => {
+  expect(externalRequests.length === 0, `external requests: ${externalRequests.slice(0, 3).join(", ")}`);
 });
 
 await step("delete-all removes local data", async () => {
+  await goto("Keeper's Room");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete all my data" }).click();
   await page.locator(".toast", { hasText: "deleted" }).waitFor({ timeout: 3000 });

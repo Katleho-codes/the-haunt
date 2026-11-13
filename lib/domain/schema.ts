@@ -120,19 +120,33 @@ export type Commitment = z.infer<typeof commitmentSchema>;
 export type CommitmentType = (typeof COMMITMENT_TYPES)[number];
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
 
-export const settingsSchema = z.object({
+export const MOTION_MODES = ["system", "reduced", "full"] as const;
+export const INTENSITIES = ["full", "restrained", "low"] as const;
+
+const settingsObject = z.object({
   locale: z.string().min(2).default("en-ZA"),
   timezone: timeZoneSchema.default("Africa/Johannesburg"),
   currency: currencySchema.default("ZAR"),
   ambience: z.boolean().default(false),
   effects: z.boolean().default(false),
   volume: z.number().min(0).max(1).default(0.24),
-  reduceMotion: z.boolean().default(false),
+  /** "system" follows the device's reduced-motion preference; "reduced" and "full" override it. */
+  motion: z.enum(MOTION_MODES).default("system"),
+  /** How much atmosphere is drawn: full haunted, restrained (no particles, softer fog) or low (no fog or grain). */
+  intensity: z.enum(INTENSITIES).default("full"),
   /** Time of day reminders appear, in the profile timezone. */
   reminderTime: localTimeSchema.default("09:00"),
   /** Days before the due date, used for new commitments. */
   defaultReminderOffsets: z.array(z.number().int().min(0).max(365)).max(10).default([3, 1]),
 });
+
+/** Accepts settings saved before `motion` existed (a boolean `reduceMotion`) and keeps that choice. */
+export const settingsSchema = z.preprocess((value) => {
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  if (record.motion === undefined && record.reduceMotion === true) return { ...record, motion: "reduced" };
+  return value;
+}, settingsObject);
 export type Settings = z.infer<typeof settingsSchema>;
 
 export const storedDataSchema = z.object({

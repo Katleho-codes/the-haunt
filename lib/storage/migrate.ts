@@ -134,7 +134,7 @@ export function migrateLegacySettings(raw: unknown, timezone: string): Settings 
   const parsed = settingsSchema.safeParse({
     ambience: source.ambience === true,
     effects: source.effects === true,
-    reduceMotion: source.reduceMotion === true,
+    motion: source.reduceMotion === true ? "reduced" : undefined,
     currency: typeof source.currency === "string" ? source.currency : undefined,
     timezone,
     volume,

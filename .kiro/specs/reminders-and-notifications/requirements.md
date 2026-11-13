@@ -2,8 +2,8 @@
 
 Follows brief section 5.4.
 
-## Scope assumption awaiting owner approval
-First release: **in-app reminders only**, computed when the app is open or next opened. There is no background delivery. The UI and README SHALL say this. Browser push is optional (task 4.9) and email is out of scope unless the owner approves a backend.
+## Scope decision (owner, 13 November 2026)
+Server-side delivery comes after the core is finished or after submission. First release: **in-app reminders only**, computed when the app is open or next opened. There is no background delivery. The UI and README SHALL say this. Browser push is optional (task 4.9) and email is out of scope unless the owner approves a backend.
 
 ### Requirement 1: Reminder rules
 - WHEN a user sets reminders on a commitment THEN each reminder SHALL be an offset (minutes before the due date/time) with channel `in_app`.
