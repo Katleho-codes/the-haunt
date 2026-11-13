@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Archive, Bell, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight,
@@ -31,6 +31,7 @@ import { addDays } from "@/lib/domain/dates";
 import { ambienceGain, effectGain, GAIN_CEILING } from "@/lib/audio/levels";
 import { computeHouseState } from "@/lib/domain/house-state";
 import { shouldReduceMotion } from "@/lib/domain/motion";
+import { buildExportBundle } from "@/lib/storage/export";
 import { LocalStorageRepository } from "@/lib/storage/local-storage-repository";
 import type { LoadStatus } from "@/lib/storage/repository";
 
@@ -142,6 +143,7 @@ export default function HauntApp() {
   const [seal, setSeal] = useState<number | null>(null);
   const bellRef = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [archiveTab, setArchiveTab] = useState<"active" | "archived">("active");
   const [searchText, setSearchText] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activated, setActivated] = useState(false);
@@ -183,6 +185,17 @@ export default function HauntApp() {
     document.documentElement.dataset.motion = settings.motion;
     document.documentElement.dataset.intensity = settings.intensity;
   }, [settings, hydrated, repository]);
+  // Ctrl+K or Cmd+K opens search.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // Audio may only start after the person has interacted with the page.
   useEffect(() => {
     const activate = () => setActivated(true);
@@ -235,10 +248,13 @@ export default function HauntApp() {
   const mood = useMemo(() => computeHouseState(commitments, today), [commitments, today]);
   const nextDue = useMemo(() => [...active].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0], [active]);
   const currentNav = navItems.find((item) => item.id === view) ?? navItems[0];
+  // Archived commitments keep their history and are listed under The Archive > Archived, where they can be restored.
+  const archived = useMemo(() => commitments.filter((item) => item.status === "archived"), [commitments]);
+  const showingArchived = view === "archive" && archiveTab === "archived";
   const filtered = useMemo(() => {
-    const source = view === "crypt" ? completed : view === "clocktower" ? recurring : active;
+    const source = showingArchived ? archived : view === "crypt" ? completed : view === "clocktower" ? recurring : active;
     return filterCommitments(source, { text: searchText }).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.title.localeCompare(b.title));
-  }, [active, completed, recurring, searchText, view]);
+  }, [active, archived, completed, recurring, searchText, showingArchived, view]);
 
   function notify(message: string, undoId?: string) { setToast({ message, undoId }); }
   const reduceMotionNow = () => shouldReduceMotion(settings.motion, typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -338,6 +354,11 @@ export default function HauntApp() {
     notify("Laid to rest. Well done.", item.id);
   }
   function restoreCommitment(item: Commitment) {
+    if (item.status === "archived") {
+      setCommitments((items) => items.map((entry) => entry.id === item.id ? restoreItem(entry, new Date().toISOString()) : entry));
+      notify("Restored from the archive.");
+      return;
+    }
     const entry = occurrences.find((o) => o.id === item.id);
     if (entry) {
       const master = commitments.find((c) => c.id === entry.commitmentId);
@@ -353,7 +374,7 @@ export default function HauntApp() {
   }
   function archiveItem(item: Commitment) {
     setCommitments((items) => items.map((entry) => entry.id === item.id ? archiveCommitment(entry, new Date().toISOString()) : entry));
-    notify("Archived. The history is kept.");
+    notify("Archived. Find it under The Archive > Archived to restore it.");
   }
   function deleteCommitment(item: Commitment) {
     const historyEntry = occurrences.find((o) => o.id === item.id);
@@ -374,7 +395,7 @@ export default function HauntApp() {
     notify("Fictional demo records added.");
   }
   function deleteAllData() {
-    if (!window.confirm("Delete every commitment and setting stored in this browser? This cannot be undone.")) return;
+    if (!window.confirm("Delete every commitment, completion record, reminder and setting stored in this browser, including any backup copies? This cannot be undone. Export first if you want to keep a copy.")) return;
     void repository?.deleteAll(LOCAL_USER).then(() => {
       setCommitments([]);
       setOccurrences([]);
@@ -396,10 +417,11 @@ export default function HauntApp() {
   }
 
   function exportData() {
-    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), commitments, settings }, null, 2)], { type: "application/json" });
+    const bundle = buildExportBundle({ commitments, occurrences, reminders, settings }, new Date().toISOString());
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = `the-haunt-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url);
-    notify("Your ledger has been exported.");
+    notify("Exported: commitments, completion history, reminders and settings. There is no import yet.");
   }
 
   return (
@@ -410,7 +432,7 @@ export default function HauntApp() {
       <aside className={classNames("sidebar", mobileNavOpen && "sidebar-open")}>
         <div className="brand-lockup">
           <div className="brand-mark"><Ghost size={21} strokeWidth={1.5} /></div>
-          <div><div className="brand-name">THE HAUNT<span>™</span></div><div className="brand-caption">PERSONAL LEDGER OF THE LIVING</div></div>
+          <div><div className="brand-name">THE HAUNT</div><div className="brand-caption">PERSONAL LEDGER OF THE LIVING</div></div>
           <button className="icon-button sidebar-close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={17}/></button>
         </div>
         <div className="sidebar-rule"><span>YOUR HOUSE</span><i /></div>
@@ -443,7 +465,7 @@ export default function HauntApp() {
           <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={19}/></button>
           <div className="breadcrumb"><span>THE HAUNT</span><ChevronRight size={13}/><strong>{currentNav.label.toUpperCase()}</strong></div>
           <div className="topbar-actions">
-            <button className="topbar-search" onClick={() => setSearchOpen((open) => !open)}><Search size={15}/><span>Search the house</span><kbd>⌘ K</kbd></button>
+            <button className="topbar-search" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K"><Search size={15}/><span>Search the house</span><kbd aria-hidden="true">Ctrl K</kbd></button>
             <button ref={bellRef} className="icon-button bell-button" onClick={() => (notificationsOpen ? closeNotifications() : openNotifications())} aria-label={`Reminders: ${unseenReminders} new, ${visibleReminders.length} in total`} aria-expanded={notificationsOpen} title="Reminders"><Bell size={17}/>{(unseenReminders > 0 || visibleReminders.length > 0) && <em className={classNames("bell-count", unseenReminders > 0 && "bell-count-new")}>{unseenReminders > 0 ? unseenReminders : visibleReminders.length}</em>}</button>
             <button className="icon-button sound-button" onClick={() => updateSettings({ effects: !settings.effects })} aria-label={settings.effects ? "Mute sound effects" : "Enable sound effects"} title="Sound effects"><span className={classNames("sound-indicator", settings.effects && "sound-indicator-on")}/>{settings.effects ? <Volume2 size={17}/> : <VolumeX size={17}/>}</button>
             <div className="topbar-avatar">K</div>
@@ -451,7 +473,7 @@ export default function HauntApp() {
         </header>
 
         {notificationsOpen && <NotificationCentre reminders={visibleReminders} commitments={commitments} today={today} locale={settings.locale} reminderTime={settings.reminderTime} showTest={showTestReminder} onClose={closeNotifications} onSnooze={snoozeFromCentre} onDismiss={dismissFromCentre} onOpen={openFromCentre} onSendTest={() => setShowTestReminder(true)} onDismissTest={() => setShowTestReminder(false)}/>}
-        {searchOpen && <div className="search-popover"><Search size={16}/><input autoFocus value={searchText} onChange={(event) => { setSearchText(event.target.value); if (view === "today") setView("archive"); }} placeholder="Search commitments, notes, categories..."/><button className="icon-button tiny" onClick={() => { setSearchOpen(false); setSearchText(""); }}><X size={15}/></button></div>}
+        {searchOpen && <div className="search-popover" role="search"><Search size={16}/><input autoFocus aria-label="Search commitments" value={searchText} onKeyDown={(event) => { if (event.key === "Escape") { setSearchOpen(false); setSearchText(""); } }} onChange={(event) => { setSearchText(event.target.value); if (view === "today") setView("archive"); }} placeholder="Search commitments, notes, categories..."/><button className="icon-button tiny" aria-label="Close search" onClick={() => { setSearchOpen(false); setSearchText(""); }}><X size={15}/></button></div>}
 
         <div className="page-content">
           {hydrated && loadStatus.kind === "corrupt" && <div className="status-banner" role="alert"><AlertTriangle size={15}/><p><strong>Stored data could not be read.</strong> A copy was kept in this browser under <code>{loadStatus.backupKey}</code> and the ledger was started empty.</p></div>}
@@ -462,7 +484,7 @@ export default function HauntApp() {
               <div className="hero-copy">
                 <div className="eyebrow"><span className="eyebrow-line"/> {hydrated ? new Intl.DateTimeFormat(settings.locale, { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: settings.timezone }).format(now).toUpperCase() : ""} <span className="eyebrow-line"/></div>
                 <h1>The house<br/><em>remembers</em><br/>everything<span className="title-period">.</span></h1>
-                <p className="hero-subtitle">Good evening, Keeper. There are a few loose ends<br className="desktop-only"/> wandering the halls tonight.</p>
+                <p className="hero-subtitle">Welcome back, Keeper. Some loose ends<br className="desktop-only"/> may be wandering the halls.</p>
                 <button className="hero-cta" onClick={openCreate}><Plus size={15}/> Capture a commitment <span>↗</span></button>
               </div>
               <div className="hero-art" aria-hidden="true">
@@ -472,7 +494,7 @@ export default function HauntApp() {
                 <div className="hero-silhouette"/>
                 <div className="firefly firefly-one"/><div className="firefly firefly-two"/><div className="firefly firefly-three"/>
               </div>
-              <div className="hero-bottom-note"><Moon size={12}/> THE VEIL IS THIN TONIGHT <span aria-hidden="true">·</span> YOUR LEDGER IS OPEN</div>
+              <div className="hero-bottom-note"><Moon size={12}/> THE VEIL IS THIN <span aria-hidden="true">·</span> YOUR LEDGER IS OPEN</div>
             </section>
 
             <section className="stat-grid" aria-label="Commitment overview">
@@ -497,7 +519,7 @@ export default function HauntApp() {
                   <div className="capture-card-top"><span className="mini-seal"><WandSparkles size={15}/></span><span>THE SÉANCE ROOM</span><span className="capture-status">OPEN</span></div>
                   <h3>Something on<br/>your mind?</h3>
                   <p>Speak it, write it, leave it here. We&apos;ll help you remember.</p>
-                  <div className="capture-input-wrap"><textarea value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder={'“Fibre is due on the 25th every month...”'} rows={3}/><div className="capture-input-footer"><span><Sparkles size={12}/> QUICK CAPTURE</span><button onClick={handleQuickCapture} disabled={!quickText.trim()} aria-label="Interpret quick capture"><ArrowUpRight size={16}/></button></div></div>
+                  <div className="capture-input-wrap"><textarea aria-label="Quick capture note" value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder={'“Fibre is due on the 25th every month...”'} rows={3}/><div className="capture-input-footer"><span><Sparkles size={12}/> QUICK CAPTURE</span><button onClick={handleQuickCapture} disabled={!quickText.trim()} aria-label="Interpret quick capture"><ArrowUpRight size={16}/></button></div></div>
                   <div className="capture-methods"><span><FileText size={13}/> Paste text</span><span><Mic size={13}/> Voice soon</span><span><Paperclip size={13}/> Files soon</span></div>
                 </div>
                 <div className="moon-card"><div className="moon-card-top"><span>THE NIGHT WATCH</span><CloudMoon size={16}/></div><div className="moon-phase"><div className="phase-moon"/><div><strong>{hydrated ? new Intl.DateTimeFormat(settings.locale, { weekday: "long", timeZone: settings.timezone }).format(now) : ""}</strong><span>THE HOUSE IS {mood.label}</span></div></div><div className="moon-card-rule"/><div className="moon-card-bottom"><span>Next commitment</span><strong>{nextDue ? dueLabel(nextDue.dueDate, today, settings.locale) : "None in sight"}</strong></div></div>
@@ -509,8 +531,9 @@ export default function HauntApp() {
           {view !== "today" && <>
             <section className="inner-page-heading"><div className="eyebrow"><span className="eyebrow-line"/> THE HOUSE / {currentNav.label.toUpperCase()}</div><div className="inner-heading-row"><div><h1>{view === "archive" ? <>The <em>Archive</em></> : view === "clocktower" ? <>The <em>Clocktower</em></> : view === "crypt" ? <>The <em>Crypt</em></> : <>The Keeper&apos;s <em>Room</em></>}</h1><p>{view === "archive" ? "Every loose end, every promise, every date worth remembering." : view === "clocktower" ? "The cycles that turn, again and again." : view === "crypt" ? "The commitments you've successfully laid to rest." : "Make the house feel the way you want it to."}</p></div>{view !== "keeper" && <button className="hero-cta compact-cta" onClick={openCreate}><Plus size={15}/> New commitment</button>}</div></section>
             {view === "keeper" ? <SettingsView settings={settings} updateSettings={updateSettings} exportData={exportData} total={commitments.length} loadDemoData={loadDemoData} deleteAllData={deleteAllData} /> : <>
-              <div className="list-toolbar"><div className="filter-count">{filtered.length} {view === "crypt" ? "resting records" : "records in this room"}</div><div className="toolbar-search"><Search size={14}/><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search the ledger..."/><SlidersHorizontal size={14}/></div></div>
-              <div className="commitment-list large-list">{filtered.length === 0 ? <EmptyState title={view === "crypt" ? "The crypt is empty." : "Nothing stirs here."} text={view === "crypt" ? "Completed commitments will find their resting place here." : "No commitments match this room yet."} onAction={openCreate}/> : filtered.map((item) => <CommitmentRow key={item.id} item={item} onComplete={completeCommitment} onEdit={openEdit} onDelete={deleteCommitment} onRestore={restoreCommitment} onArchive={archiveItem} today={today} locale={settings.locale} completed={view === "crypt"} nextDates={view === "clocktower" ? nextDates(item, 3) : undefined}/>)}</div>
+              {view === "archive" && <div className="archive-tabs" role="group" aria-label="Which commitments to show"><button aria-pressed={archiveTab === "active"} className={classNames("archive-tab", archiveTab === "active" && "archive-tab-on")} onClick={() => setArchiveTab("active")}>Active ({active.length})</button><button aria-pressed={archiveTab === "archived"} className={classNames("archive-tab", archiveTab === "archived" && "archive-tab-on")} onClick={() => setArchiveTab("archived")}>Archived ({archived.length})</button></div>}
+              <div className="list-toolbar"><div className="filter-count" role="status">{filtered.length} {view === "crypt" ? "resting records" : showingArchived ? "archived records" : "records in this room"}</div><div className="toolbar-search"><Search size={14}/><input aria-label="Search the ledger" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search the ledger..."/><SlidersHorizontal size={14} aria-hidden="true"/></div></div>
+              <div className="commitment-list large-list">{filtered.length === 0 ? <EmptyState title={view === "crypt" ? "The crypt is empty." : showingArchived ? "Nothing is archived." : "Nothing stirs here."} text={view === "crypt" ? "Completed commitments will find their resting place here." : showingArchived ? "Archived commitments keep their history and can be restored from here." : "No commitments match this room yet."} onAction={openCreate}/> : filtered.map((item) => <CommitmentRow key={item.id} item={item} onComplete={completeCommitment} onEdit={openEdit} onDelete={deleteCommitment} onRestore={restoreCommitment} onArchive={archiveItem} today={today} locale={settings.locale} completed={view === "crypt"} archived={showingArchived} nextDates={view === "clocktower" ? nextDates(item, 3) : undefined}/>)}</div>
             </>}
           </>}
           <footer className="page-footer"><span>THE HAUNT © 2026</span><span>KEEP LIFE&apos;S LOOSE ENDS FROM COMING BACK TO HAUNT YOU.</span><span>BUILT FOR THE LIVING <Ghost size={12}/></span></footer>
@@ -530,16 +553,30 @@ function StatCard({ label, value, note, icon, warning, compact }: { label: strin
   return <div className="stat-card"><div className="stat-card-top"><span>{label}</span><span className={classNames("stat-icon", warning && "stat-icon-warning")}>{icon}</span></div><div className={classNames("stat-value", compact && "stat-value-money", warning && "stat-value-warning")}>{value}</div><div className="stat-note">{note}</div></div>;
 }
 
-function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchive, today, locale, overdue, completed, nextDates: upcomingDates }: { item: Commitment; onComplete: (item: Commitment) => void; onEdit: (item: Commitment) => void; onDelete: (item: Commitment) => void; onRestore: (item: Commitment) => void; onArchive: (item: Commitment) => void; today: string; locale: string; overdue?: boolean; completed?: boolean; nextDates?: string[] }) {
+function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchive, today, locale, overdue, completed, archived, nextDates: upcomingDates }: { item: Commitment; onComplete: (item: Commitment) => void; onEdit: (item: Commitment) => void; onDelete: (item: Commitment) => void; onRestore: (item: Commitment) => void; onArchive: (item: Commitment) => void; today: string; locale: string; overdue?: boolean; completed?: boolean; archived?: boolean; nextDates?: string[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const finished = Boolean(completed || archived);
+  // Keyboard: focus moves into the menu when it opens; arrows move between items; Escape closes and returns focus.
+  useEffect(() => { if (menuOpen) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(); }, [menuOpen]);
+  function closeMenu(returnFocus: boolean) { setMenuOpen(false); if (returnFocus) moreRef.current?.focus(); }
+  function onMenuKey(event: React.KeyboardEvent) {
+    if (event.key === "Escape") { event.stopPropagation(); closeMenu(true); return; }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    items[(index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+  }
   const categoryIcon = item.type === "bill" ? <CircleDollarSign size={16}/> : item.type === "subscription" ? <RotateCcw size={16}/> : item.type === "appointment" ? <CalendarDays size={16}/> : item.type === "renewal" ? <Shield size={16}/> : item.type === "household" ? <House size={16}/> : <FileText size={16}/>;
-  return <article data-commitment-id={item.id} className={classNames("commitment-row", overdue && "commitment-row-overdue", completed && "commitment-row-completed", menuOpen && "commitment-row-menu-open")}>
-    <button className={classNames("complete-control", completed && "complete-control-done")} onClick={() => completed ? undefined : onComplete(item)} disabled={completed} aria-label={completed ? "Completed" : "Mark complete"}>{completed ? <Check size={14}/> : <span/>}</button>
+  return <article data-commitment-id={item.id} className={classNames("commitment-row", overdue && "commitment-row-overdue", finished && "commitment-row-completed", menuOpen && "commitment-row-menu-open")}>
+    <button className={classNames("complete-control", finished && "complete-control-done")} onClick={() => finished ? undefined : onComplete(item)} disabled={finished} aria-label={archived ? `${item.title} is archived` : completed ? `${item.title} is completed` : `Mark ${item.title} complete`}>{finished ? <Check size={14}/> : <span/>}</button>
     <div className="commitment-type-icon">{categoryIcon}</div>
     <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i aria-hidden="true">·</i><span>{item.description || "No additional details"}</span></div>{upcomingDates && upcomingDates.length > 0 && <div className="commitment-next">Next: {upcomingDates.map((date) => formatDateOnly(date, locale, { day: "numeric", month: "short" })).join(" · ")}</div>}</div>
     <div className="commitment-due"><strong className={classNames(overdue && "danger-text")}>{dueLabel(item.dueDate, today, locale)}</strong><span>{formatDateOnly(item.dueDate, locale, { day: "2-digit", month: "short", year: "numeric" })}</span></div>
     <div className="commitment-amount">{formatMoney(item.amountMinor, item.currency, locale)}</div>
-    <div className="row-menu-wrap"><button className="icon-button tiny row-more" aria-label="More actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close actions" onClick={() => setMenuOpen(false)}/><div className="row-menu">{!completed && <button onClick={() => { onComplete(item); setMenuOpen(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button onClick={() => { onEdit(item); setMenuOpen(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && <button onClick={() => { onArchive(item); setMenuOpen(false); }}><Archive size={14}/> Archive</button>}{completed && <button onClick={() => { onRestore(item); setMenuOpen(false); }}><RotateCcw size={14}/> Restore</button>}<button className="danger-menu" onClick={() => { onDelete(item); setMenuOpen(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>
+    <div className="row-menu-wrap"><button ref={moreRef} className="icon-button tiny row-more" aria-label={`More actions for ${item.title}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" aria-hidden="true" tabIndex={-1} onClick={() => closeMenu(false)}/><div className="row-menu" role="menu" aria-label={`Actions for ${item.title}`} ref={menuRef} onKeyDown={onMenuKey}>{!finished && <button role="menuitem" onClick={() => { onComplete(item); closeMenu(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button role="menuitem" onClick={() => { onEdit(item); closeMenu(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && !finished && <button role="menuitem" onClick={() => { onArchive(item); closeMenu(false); }}><Archive size={14}/> Archive</button>}{finished && <button role="menuitem" onClick={() => { onRestore(item); closeMenu(false); }}><RotateCcw size={14}/> Restore</button>}<button role="menuitem" className="danger-menu" onClick={() => { onDelete(item); closeMenu(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>
   </article>;
 }
 
@@ -605,8 +642,8 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
       <label className="field-label">COMMITMENT NAME {checkTag("title")}<input className="field-control" value={title} onChange={(event) => set({ title: event.target.value })} placeholder="e.g. Pay school fees" autoFocus required maxLength={120}/></label>
       <label className="field-label">DETAILS <span className="optional-label">OPTIONAL</span><textarea className="field-control field-textarea" value={description} onChange={(event) => set({ description: event.target.value })} placeholder="Add a note to your future self..." rows={2}/></label>
       <div className="field-row"><label className="field-label">CATEGORY {checkTag("type")}<select className="field-control" value={draft.type} onChange={(event) => set({ type: event.target.value as CommitmentType })}>{COMMITMENT_TYPES.map((key) => <option value={key} key={key}>{categoryLabels[key]}</option>)}</select></label><label className="field-label">DUE DATE {checkTag("dueDate")}<input className="field-control" type="date" value={dueDate} onChange={(event) => set({ dueDate: event.target.value })} required/></label></div>
-      <div className="field-row"><label className="field-label">REPEAT {checkTag("recurrence")}<select className="field-control" value={draft.repeat} onChange={(event) => set({ repeat: event.target.value as RepeatChoice })}><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="fortnightly">Every two weeks</option><option value="monthly">Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label><label className="field-label">AMOUNT <span className="optional-label">OPTIONAL</span> {checkTag("amountMinor")}{checkTag("currency")}<div className="amount-control"><select className="field-control currency-select" value={currency} onChange={(event) => set({ currency: event.target.value })}>{[...new Set(["ZAR", "USD", "GBP", "EUR", currency])].map((code) => <option key={code}>{code}</option>)}</select><input className="field-control" type="number" min="0" step="0.01" value={amount} onChange={(event) => set({ amount: event.target.value })} placeholder="0.00"/></div></label></div>
-      <div className="reminder-config"><div className="reminder-head"><span>REMIND ME BEFORE</span><button type="button" onClick={() => setShowAdvanced((show) => !show)}>{showAdvanced ? "Hide" : "Customise"} <ChevronDown size={13}/></button></div>{showAdvanced && <div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} className={classNames("reminder-chip", reminders.includes(value) && "reminder-chip-active")} onClick={() => toggleReminder(value)}>{value === 0 ? "On the day" : `${value} day${value === 1 ? "" : "s"} before`}</button>)}</div>}</div>
+      <div className="field-row"><label className="field-label">REPEAT {checkTag("recurrence")}<select className="field-control" value={draft.repeat} onChange={(event) => set({ repeat: event.target.value as RepeatChoice })}><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="fortnightly">Every two weeks</option><option value="monthly">Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label><label className="field-label">AMOUNT <span className="optional-label">OPTIONAL</span> {checkTag("amountMinor")}{checkTag("currency")}<div className="amount-control"><select className="field-control currency-select" aria-label="Currency" value={currency} onChange={(event) => set({ currency: event.target.value })}>{[...new Set(["ZAR", "USD", "GBP", "EUR", currency])].map((code) => <option key={code}>{code}</option>)}</select><input className="field-control" type="number" min="0" step="0.01" aria-label="Amount" value={amount} onChange={(event) => set({ amount: event.target.value })} placeholder="0.00"/></div></label></div>
+      <div className="reminder-config"><div className="reminder-head"><span>REMIND ME BEFORE</span><button type="button" onClick={() => setShowAdvanced((show) => !show)}>{showAdvanced ? "Hide" : "Customise"} <ChevronDown size={13}/></button></div>{showAdvanced && <div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} aria-pressed={reminders.includes(value)} className={classNames("reminder-chip", reminders.includes(value) && "reminder-chip-active")} onClick={() => toggleReminder(value)}>{value === 0 ? "On the day" : `${value} day${value === 1 ? "" : "s"} before`}</button>)}</div>}</div>
       {errors.length > 0 && <p className="form-error" role="alert">{errors.join(". ")}.</p>}<div className="modal-actions"><button type="button" className="button-quiet" onClick={onClose}>Cancel</button><button type="submit" className="button-primary" disabled={!canSave}>{isProposal ? <><Check size={15}/> Confirm & add to ledger</> : <><Plus size={15}/> {initial ? "Save changes" : "Add to the ledger"}</>}</button></div>
     </form>
     <div className="modal-footnote"><LockKeyhole size={11}/> Your entries stay on this device. Nothing is sent anywhere.</div>
@@ -623,17 +660,18 @@ function SettingsView({ settings, updateSettings, exportData, total, loadDemoDat
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><SunMoon size={17}/></span><div><h3>Visual experience</h3><p>Keep the darkness comfortable and accessible.</p></div></div>
       <div className="setting-range"><div><strong>Motion</strong><span>Follow your device, or choose. Reduced motion stops drifting fog and animated transitions.</span></div><select className="field-control settings-select" aria-label="Motion" value={settings.motion} onChange={(event) => updateSettings({ motion: event.target.value as Settings["motion"] })}><option value="system">Follow my device</option><option value="reduced">Reduced</option><option value="full">Full</option></select></div>
       <div className="setting-range"><div><strong>Atmosphere</strong><span>How much fog, grain and drifting light is drawn.</span></div><select className="field-control settings-select" aria-label="Atmosphere" value={settings.intensity} onChange={(event) => updateSettings({ intensity: event.target.value as Settings["intensity"] })}><option value="full">Full haunted</option><option value="restrained">Restrained</option><option value="low">Low (no fog or grain)</option></select></div>
-      <div className="setting-range"><div><strong>Display currency</strong><span>Used for commitment amount summaries.</span></div><select className="field-control settings-select" value={settings.currency} onChange={(event) => updateSettings({ currency: event.target.value })}><option>ZAR</option><option>USD</option><option>GBP</option><option>EUR</option></select></div>
+      <div className="setting-range"><div><strong>Default currency</strong><span>Pre-selected for new commitments. Totals are always kept per currency.</span></div><select className="field-control settings-select" aria-label="Default currency" value={settings.currency} onChange={(event) => updateSettings({ currency: event.target.value })}><option>ZAR</option><option>USD</option><option>GBP</option><option>EUR</option></select></div>
     </section>
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><Bell size={17}/></span><div><h3>Reminders</h3><p>In-app only. They appear while THE HAUNT is open.</p></div></div>
       <div className="setting-range"><div><strong>Reminder time</strong><span>Time of day a reminder becomes due.</span></div><input className="field-control settings-select" type="time" aria-label="Reminder time" value={settings.reminderTime} onChange={(event) => { if (event.target.value) updateSettings({ reminderTime: event.target.value }); }}/></div>
       <div className="setting-range"><div><strong>Default reminders</strong><span>Used for new commitments.</span></div><div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} aria-pressed={settings.defaultReminderOffsets.includes(value)} className={classNames("reminder-chip", settings.defaultReminderOffsets.includes(value) && "reminder-chip-active")} onClick={() => updateSettings({ defaultReminderOffsets: settings.defaultReminderOffsets.includes(value) ? settings.defaultReminderOffsets.filter((entry) => entry !== value) : [...settings.defaultReminderOffsets, value].sort((a, b) => b - a) })}>{value === 0 ? "On the day" : `${value}d`}</button>)}</div></div>
     </section>
-    <section className="settings-card settings-data-card"><div className="settings-card-heading"><span className="settings-icon"><Shield size={17}/></span><div><h3>Your personal ledger</h3><p>This prototype stores commitments in this browser only.</p></div></div><div className="data-summary"><div><span>STORED RECORDS</span><strong>{total.toString().padStart(2, "0")}</strong></div><div><span>STORAGE MODE</span><strong>LOCAL</strong></div></div><div className="settings-actions"><button className="button-secondary" onClick={exportData}><Download size={14}/> Export my data</button><button className="button-secondary" onClick={loadDemoData}><Sparkles size={14}/> Load fictional demo data</button><button className="button-secondary button-danger" onClick={deleteAllData}><Trash2 size={14}/> Delete all my data</button><span><LockKeyhole size={12}/> No account or cloud sync is connected yet.</span></div></section>
+    <section className="settings-card settings-data-card"><div className="settings-card-heading"><span className="settings-icon"><Shield size={17}/></span><div><h3>Your personal ledger</h3><p>This prototype stores commitments in this browser only.</p></div></div><div className="data-summary"><div><span>STORED RECORDS</span><strong>{total.toString().padStart(2, "0")}</strong></div><div><span>STORAGE MODE</span><strong>LOCAL</strong></div></div><div className="settings-actions"><button className="button-secondary" onClick={exportData}><Download size={14}/> Export my data</button><button className="button-secondary" onClick={loadDemoData}><Sparkles size={14}/> Load fictional demo data</button><button className="button-secondary button-danger" onClick={deleteAllData}><Trash2 size={14}/> Delete all my data</button><span><LockKeyhole size={12}/> No account or cloud sync is connected yet.</span></div><p className="data-note">Export saves your commitments, completion history, reminders and settings as a JSON file. There is no import yet. Delete removes everything stored in this browser, including backup copies.</p></section>
     <div className="prototype-note"><AlertTriangle size={15}/><p><strong>Prototype notice.</strong> Reminders appear inside the app only: there is no email, push, text-message or background delivery. AI document extraction, voice capture and cloud synchronisation are not connected in this first build. The current version demonstrates the working local commitment ledger and horror interface.</p></div>
   </div>;
 }
 
 function SettingToggle({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <div className="setting-toggle-row"><div><strong>{title}</strong><span>{description}</span></div><button className={classNames("toggle-switch", checked && "toggle-switch-on")} role="switch" aria-checked={checked} onClick={() => onChange(!checked)}><span/></button></div>;
+  const id = useId();
+  return <div className="setting-toggle-row"><div><strong id={`${id}-name`}>{title}</strong><span id={`${id}-desc`}>{description}</span></div><button className={classNames("toggle-switch", checked && "toggle-switch-on")} role="switch" aria-checked={checked} aria-labelledby={`${id}-name`} aria-describedby={`${id}-desc`} onClick={() => onChange(!checked)}><span/></button></div>;
 }

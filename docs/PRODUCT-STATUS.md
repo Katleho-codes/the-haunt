@@ -1,31 +1,32 @@
 # Product status
 
-## Implemented in the local prototype
+_Summary last revised 13 November 2026. The dated updates further down are a log; where they differ, this summary and the newest update win._
 
-- [x] Responsive cinematic application shell
-- [x] Dashboard with active, overdue, due-today and upcoming groupings
-- [x] Manual create / edit / delete / complete / restore flows
-- [x] Recurrence metadata and recurring view
-- [x] Amount and multi-currency display
-- [x] Local storage persistence
-- [x] Quick text capture with deterministic parsing and editable review
-- [x] Ambient / interaction sound preferences
-- [x] Reduced-motion preference
-- [x] JSON data export
-- [x] Kiro steering and feature spec scaffolding
+## Implemented in the local-first build (verified items are listed in the dated updates)
+
+- [x] Responsive cinematic application shell; five rooms (Hall, Archive, Clocktower, Crypt, Keeper's Room)
+- [x] Create / edit / delete / complete / restore / archive, with an Active and Archived list in The Archive
+- [x] Validated domain model: date-only due dates, minor-unit money, per-currency totals
+- [x] Recurrence engine with completion history and undo of the latest completion
+- [x] Browser-local persistence behind a repository interface, with migration and corrupt-data backup
+- [x] In-app reminders with a notification centre (snooze, dismiss, test reminder)
+- [x] Quick text capture: rule-based reader (not AI), proposal schema, review step with CHECK THIS markers
+- [x] House mood, motion and atmosphere settings, gated sound with separate toggles and a volume ceiling
+- [x] JSON export of commitments, completion history, reminders and settings; delete-all that also removes backups
+- [x] Automated tests (Vitest and fast-check) and a browser smoke test (Playwright core, Edge); no CI yet
+- [x] MIT licence
 
 ## Not implemented yet
 
-- [ ] Backend API and authentication
+- [ ] Backend API, authentication and server-side ownership (planned after the core is finished or after submission)
 - [ ] PostgreSQL persistence and migrations
-- [ ] Recurrence occurrence materialisation and timezone-safe scheduling
-- [ ] Reminder worker / email / web push delivery
-- [ ] LLM-based extraction with schema validation
-- [ ] PDF/image OCR and file scanning
-- [ ] Voice transcription
-- [ ] PWA service worker / offline sync conflict handling
-- [ ] Automated tests and CI
-- [ ] Privacy policy, data deletion workflow and production hardening
+- [ ] Reminders while the app is closed; email or web push delivery
+- [ ] Data import
+- [ ] LLM-based extraction; PDF/image OCR; voice transcription
+- [ ] PWA service worker and offline shell
+- [ ] Timezone and locale settings in the UI; monthly recurring-amount view; edit scopes for series; pause
+- [ ] Continuous integration; security headers; privacy notes page; public deployment
+- [ ] Multi-tab safe saving
 
 ## Known design constraints
 
@@ -90,3 +91,13 @@ Done: house mood (Calm / Watchful / Restless) with a text label and background s
 Bugs found by the new checks and fixed: a hydration mismatch in the prerendered page (the date was baked in at build time); text colours below 4.5:1 across the app; touch targets of 13 to 19px on mobile; the completion ghost row duplicating selectors.
 
 Not done or not verified: red usage was not reviewed line by line against the steering (6.8); pendulum and crypt motifs (6.12); only Microsoft Edge was tested, no screen reader, no real device, no Safari or Firefox; whether the audio actually sounds right or is comfortably quiet was not heard by anyone (only gain values are tested); the contrast audit approximates gradients. Two e2e runs crashed with an uncaptured Node error and passed on every later rerun (6 runs); the cause is unknown.
+
+## Update 13 November 2026 (fixes after the independent review)
+
+Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warning), `npm test` (13 files, 181 tests pass), production build (pass), `npm run e2e` (30 browser steps in Edge, all pass), `node e2e/contrast.mjs` (664 text elements pass), `node e2e/screenshots.mjs` (no overflow, no targets under 24px).
+
+Fixed: archived items now have a list and Restore (H-1); controls have accessible names, checked by a sweep over every view and dialog (H-2, L-2); MIT licence added (H-3); delete-all removes backups and prototype copies (M-1); export includes completion history and reminders (M-2); parser no longer reads weights as money and reports times it ignores (M-3, M-4); Ctrl+K search (L-1); trademark mark removed (L-4); greeting no longer claims it is evening (L-5); stale docs corrected (L-6). See section 9 of `docs/REVIEW-2026-11-13.md`.
+
+How the fixes were checked: new unit tests and e2e steps were mutation-checked (the fix was removed and the checks were seen to fail) for the archived list, switch names, quick-capture label, weight handling, word-currency flag, time note, title cutting and delete-all backups. The reviewer has not re-reviewed.
+
+Still open from the review: text size (M-5), timezone and locale settings (M-7), overdue series needing one click per period (M-8), multi-tab and failed-save handling (M-6), past-date warning (L-8), data import, security headers, public deployment.

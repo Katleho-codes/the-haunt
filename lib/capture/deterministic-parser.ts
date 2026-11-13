@@ -1,6 +1,6 @@
 import { addDays, todayIn, weekdayOf, type DateOnly } from "@/lib/domain/dates";
 import { commitmentProposalSchema, type CommitmentProposal } from "@/lib/capture/proposal";
-import { classify, extractAmounts, extractDate, extractRecurrence, inferTitle, suggestReminders } from "@/lib/capture/extract";
+import { classify, extractAmounts, extractDate, extractRecurrence, extractTimeMention, inferTitle, suggestReminders } from "@/lib/capture/extract";
 
 export interface CaptureContext {
   /** Injected so results are reproducible in tests. */
@@ -94,10 +94,19 @@ export function parseCapture(raw: string, context: CaptureContext): CommitmentPr
     confidence.recurrence = 0.85;
   }
 
+  // A time of day is not read yet. Keep it in the details and say so, so it is not silently lost.
+  const timeMention = extractTimeMention(text);
+  let description: string | undefined;
+  if (timeMention) {
+    description = `Time mentioned in your note: ${timeMention}`;
+    flag("general", `A time (${timeMention}) was found, but times of day are not read yet. It was copied into the details.`);
+  }
+
   const offsets = dueDate || recurrence ? suggestReminders(classification.type) : [];
 
   const candidate = {
     title,
+    description,
     // The note itself is shown during review (sourceSummary) but is not copied into the saved details,
     // where it would go stale if the user edits the amount or date.
     type: classification.type,

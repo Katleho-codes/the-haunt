@@ -40,6 +40,26 @@ await page.waitForSelector(".boot-screen", { state: "detached", timeout: 10000 }
 const row = (title) => page.locator(".commitment-list .commitment-row", { has: page.locator(".commitment-title", { hasText: title }) });
 const goto = async (label) => { await page.locator(".nav-item", { hasText: label }).click(); };
 
+// Every interactive control must have an accessible name (aria-label, aria-labelledby, a label, visible text or title).
+const unnamedControls = () => page.evaluate(() => {
+  const selector = "button, [role=button], [role=switch], [role=menuitem], input:not([type=hidden]), select, textarea";
+  const nameOf = (el) => {
+    const aria = el.getAttribute("aria-label");
+    if (aria && aria.trim()) return aria.trim();
+    const by = el.getAttribute("aria-labelledby");
+    if (by) { const text = by.split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? "").join(" ").trim(); if (text) return text; }
+    if (el.labels && [...el.labels].some((l) => l.textContent.trim())) return "label";
+    if (el.closest("label")?.textContent.trim()) return "wrapping label";
+    if (["BUTTON"].includes(el.tagName) || el.getAttribute("role")) { const t = el.textContent.trim(); if (t) return t; }
+    const title = el.getAttribute("title");
+    return title && title.trim() ? title.trim() : "";
+  };
+  return [...document.querySelectorAll(selector)]
+    .filter((el) => el.getClientRects().length > 0 && !el.closest("[aria-hidden='true']") && el.tabIndex !== -1)
+    .filter((el) => !nameOf(el))
+    .map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}${el.getAttribute("role") ? `[role=${el.getAttribute("role")}]` : ""}`);
+});
+
 await step("fresh start shows an empty ledger with no auto-loaded demo data", async () => {
   await page.getByText("Your ledger is empty.").waitFor({ timeout: 3000 });
 });
@@ -54,6 +74,13 @@ await step("demo data loads on request", async () => {
 await step("the house starts calm and says so in text", async () => {
   expect((await page.locator(".app-shell").getAttribute("data-house")) === "calm", "expected data-house=calm");
   expect(/CALM/.test(await page.locator(".house-status-card").innerText()), "house status text should read CALM");
+});
+
+await step("branding and greeting: no trademark mark, no time-of-day claims", async () => {
+  await goto("The Hall");
+  const text = await page.locator("body").innerText();
+  expect(!text.includes("™"), "the trademark mark should not be shown before the name is cleared");
+  expect(!/good evening|tonight/i.test(text), "hard-coded time-of-day wording is still on the page");
 });
 
 await step("data survives a reload", async () => {
@@ -90,6 +117,23 @@ await step("capture: a pasted bill becomes a reviewable proposal, edits are save
   expect(/900/.test(text) && !/899/.test(text), "saved record should carry the edited amount");
 });
 
+await step("capture: a weight is not money; word currencies are flagged; a time is reported, not lost", async () => {
+  await capture("Buy 2 pounds of sugar on 25 Nov 2026");
+  expect((await page.locator('.commitment-modal input[type="number"]').inputValue()) === "", "a weight was read as an amount");
+  await page.locator(".commitment-modal").getByRole("button", { name: "Cancel" }).click();
+  await capture("Pay 20 pounds to the club on 25 Nov 2026");
+  const flagged = await page.locator(".commitment-modal .extraction-notice").innerText();
+  expect(/pounds.*GBP/.test(flagged), "word currency was not flagged");
+  await page.locator(".commitment-modal").getByRole("button", { name: "Cancel" }).click();
+  await capture("Dentist 25 November at 14:30");
+  const modal = page.locator(".commitment-modal");
+  expect(/14:30.*not read yet/.test(await modal.locator(".extraction-notice").innerText()), "ignored time was not reported");
+  expect((await modal.locator("textarea").inputValue()).includes("14:30"), "the time was not kept in the details");
+  expect((await modal.locator('input[placeholder="e.g. Pay school fees"]').inputValue()) === "Dentist", "date text leaked into the title");
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await page.locator(".capture-input-wrap textarea").fill("");
+});
+
 await step("capture: an unclear date is left empty, flagged, and cannot be saved", async () => {
   await capture("The vehicle licence expires in March; remind me before it expires.");
   const modal = page.locator(".commitment-modal");
@@ -120,16 +164,102 @@ await step("clocktower lists the next three dates", async () => {
 await step("completing a recurring item advances it and records history in The Crypt", async () => {
   await row("Fibre account").locator(".complete-control").click();
   await page.locator(".toast", { hasText: "Next:" }).waitFor({ timeout: 3000 });
-  expect((await row("Fibre account").innerText()).includes("25 Dec") || (await row("Fibre account").innerText()).includes("Dec"), "due date did not move to December");
+  expect(/25 Dec\.? 2026/.test(await row("Fibre account").innerText()), `due date should now be 25 Dec 2026, row says: ${(await row("Fibre account").innerText()).replace(/\n/g, " | ")}`);
   await goto("The Crypt");
   await row("Fibre account").waitFor({ timeout: 3000 });
+  expect(/25 Nov\.? 2026/.test(await row("Fibre account").innerText()), "the Crypt record should keep the completed date, 25 Nov 2026");
+});
+
+await step("export contains commitments, completion history, reminders and settings", async () => {
+  await goto("Keeper's Room");
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export my data" }).click()]);
+  const { readFileSync } = await import("node:fs");
+  const bundle = JSON.parse(readFileSync(await download.path(), "utf8"));
+  expect(bundle.app === "the-haunt" && bundle.version === 1, "missing app/version");
+  expect(["commitments", "occurrences", "reminders", "settings", "exportedAt"].every((k) => k in bundle), `missing keys: ${Object.keys(bundle).join(",")}`);
+  expect(bundle.commitments.length >= 7, `expected the demo records plus the captured one, got ${bundle.commitments.length}`);
+  expect(bundle.occurrences.some((o) => o.id === "demo-fibre:2026-11-25"), "completion history for the fibre account is missing");
+  expect(bundle.reminders.length > 0 && bundle.reminders.every((r) => !("title" in r)), "reminders missing, or they carry commitment text");
+  expect(bundle.settings.ambience === false && bundle.settings.effects === false, "settings missing");
+  await page.locator(".toast", { hasText: "no import yet" }).waitFor({ timeout: 3000 });
 });
 
 await step("the latest completion can be undone from The Crypt", async () => {
+  await goto("The Crypt");
   await row("Fibre account").locator(".row-more").click();
-  await page.getByRole("button", { name: "Restore" }).click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
   await goto("The Clocktower");
-  expect((await row("Fibre account").innerText()).includes("Due in") || (await row("Fibre account").innerText()).includes("Nov"), "fibre did not return to November");
+  expect(/25 Nov\.? 2026/.test(await row("Fibre account").innerText()), "fibre did not return to 25 Nov 2026");
+  await goto("The Crypt");
+  expect((await row("Fibre account").count()) === 0, "the undone completion should leave The Crypt");
+});
+
+await step("archive: an archived item is listed under Archived and can be restored", async () => {
+  await goto("The Archive");
+  await row("Service the car").locator(".row-more").click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await page.locator(".toast", { hasText: "Archived" }).waitFor({ timeout: 3000 });
+  expect((await row("Service the car").count()) === 0, "archived item should leave the Active list");
+  await page.getByRole("button", { name: /^Archived \(/ }).click();
+  await row("Service the car").waitFor({ timeout: 3000 });
+  expect(/archived records/.test(await page.locator(".filter-count").innerText()), "count label should say archived records");
+  expect(await row("Service the car").locator(".complete-control").isDisabled(), "an archived item cannot be completed until restored");
+  await row("Service the car").locator(".row-more").click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
+  await page.locator(".toast", { hasText: "Restored" }).waitFor({ timeout: 3000 });
+  expect((await row("Service the car").count()) === 0, "restored item should leave the Archived list");
+  await page.getByRole("button", { name: /^Active \(/ }).click();
+  await row("Service the car").waitFor({ timeout: 3000 });
+});
+
+await step("row menu is keyboard operable: focus moves in, Escape closes and returns focus", async () => {
+  await goto("The Archive");
+  const first = page.locator(".commitment-list .commitment-row").first();
+  const more = first.locator(".row-more");
+  await more.focus();
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("role") === "menuitem"), "focus did not move into the menu");
+  await page.keyboard.press("ArrowDown");
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("role") === "menuitem"), "arrow key lost focus");
+  await page.keyboard.press("Escape");
+  expect((await first.locator(".row-menu").count()) === 0, "Escape did not close the menu");
+  expect(await more.evaluate((el) => el === document.activeElement), "focus did not return to the More button");
+  expect((await more.getAttribute("aria-expanded")) === "false", "aria-expanded should be false");
+});
+
+await step("search: Ctrl+K opens a labelled search and Escape closes it", async () => {
+  await goto("The Hall");
+  await page.keyboard.press("Control+k");
+  const input = page.getByRole("textbox", { name: "Search commitments" });
+  await input.waitFor({ timeout: 2000 });
+  expect(await input.evaluate((el) => el === document.activeElement), "search input should be focused");
+  await page.keyboard.press("Escape");
+  expect((await input.count()) === 0, "Escape should close search");
+});
+
+await step("every control on every view and dialog has an accessible name", async () => {
+  const missing = [];
+  for (const label of ["The Hall", "The Archive", "The Clocktower", "The Crypt", "Keeper's Room"]) {
+    await goto(label);
+    for (const name of await unnamedControls()) missing.push(`${label}: ${name}`);
+  }
+  await goto("The Archive");
+  await page.locator(".commitment-list .commitment-row").first().locator(".row-more").click();
+  for (const name of await unnamedControls()) missing.push(`row menu: ${name}`);
+  await page.keyboard.press("Escape");
+  await page.locator(".floating-add").click();
+  for (const name of await unnamedControls()) missing.push(`dialog: ${name}`);
+  await page.getByRole("button", { name: "Customise" }).click();
+  for (const name of await unnamedControls()) missing.push(`dialog reminders: ${name}`);
+  await page.keyboard.press("Escape");
+  await page.locator(".bell-button").click();
+  for (const name of await unnamedControls()) missing.push(`reminders panel: ${name}`);
+  await page.keyboard.press("Escape");
+  await goto("The Archive");
+  await page.keyboard.press("Control+k");
+  for (const name of await unnamedControls()) missing.push(`search: ${name}`);
+  await page.keyboard.press("Escape");
+  expect(missing.length === 0, `unnamed controls: ${[...new Set(missing)].join("; ")}`);
 });
 
 await step("completing a one-off shows a dissolve, a text message and a working Undo", async () => {
@@ -219,13 +349,13 @@ await step("no horizontal scroll on any view at 390px", async () => {
 
 await step("sound is off by default and no audio is created until it is turned on", async () => {
   await goto("Keeper's Room");
-  const switches = page.locator('[role="switch"]');
-  const states = await switches.evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-checked")));
-  expect(states[0] === "false" && states[1] === "false", `sound toggles should start off, got ${states.join(",")}`);
+  const ambient = page.getByRole("switch", { name: "Ambient atmosphere" });
+  const effects = page.getByRole("switch", { name: "Interaction sounds" });
+  expect((await ambient.getAttribute("aria-checked")) === "false" && (await effects.getAttribute("aria-checked")) === "false", "sound toggles should start off");
   expect((await page.evaluate(() => window.__audioContexts)) === 0, "an AudioContext was created while sound was off");
-  await switches.nth(0).click(); // ambient sound: a user gesture
+  await ambient.click(); // a user gesture
   await page.waitForFunction(() => window.__audioContexts === 1, null, { timeout: 3000 });
-  await switches.nth(0).click();
+  await ambient.click();
 });
 
 await step("motion and atmosphere settings apply immediately and persist", async () => {
@@ -279,13 +409,29 @@ await step("fonts are self-hosted: no request left the site", async () => {
   expect(externalRequests.length === 0, `external requests: ${externalRequests.slice(0, 3).join(", ")}`);
 });
 
-await step("delete-all removes local data", async () => {
+await step("delete-all removes every trace: data, history, reminders, backups and prototype copies", async () => {
   await goto("Keeper's Room");
+  // Plant the leftovers a real browser can accumulate: a corrupt-data backup and prototype-format copies.
+  await page.evaluate(() => {
+    localStorage.setItem("the-haunt.corrupt.local.2026-11-01T00:00:00.000Z", JSON.stringify([{ title: "Private surgery", amount: 9999 }]));
+    localStorage.setItem("the-haunt.commitments.v1", JSON.stringify([{ title: "Old prototype record" }]));
+    localStorage.setItem("the-haunt.settings.v1", "{}");
+    localStorage.setItem("unrelated.site.key", "must survive");
+  });
+  const before = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("the-haunt.")).length);
+  expect(before >= 4, `setup should leave several the-haunt keys, found ${before}`);
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete all my data" }).click();
   await page.locator(".toast", { hasText: "deleted" }).waitFor({ timeout: 3000 });
-  const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("the-haunt.store")));
-  expect(keys.length === 0 || (await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith("the-haunt.store"))) ?? "{}").commitments?.length ?? 0)) === 0, "data still present");
+  const after = await page.evaluate(() => {
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith("the-haunt."));
+    const store = JSON.parse(localStorage.getItem("the-haunt.store.v1.local") ?? "{}");
+    return { keys, commitments: store.commitments?.length ?? 0, occurrences: store.occurrences?.length ?? 0, reminders: store.reminders?.length ?? 0, unrelated: localStorage.getItem("unrelated.site.key"), everything: JSON.stringify(localStorage) };
+  });
+  expect(after.keys.every((k) => k === "the-haunt.store.v1.local"), `leftover keys: ${after.keys.join(", ")}`);
+  expect(after.commitments === 0 && after.occurrences === 0 && after.reminders === 0, `data still stored: ${after.commitments}/${after.occurrences}/${after.reminders}`);
+  expect(!/Private surgery|Old prototype|Fibre/.test(after.everything), "personal text is still in browser storage");
+  expect(after.unrelated === "must survive", "delete-all must not touch other sites' keys");
 });
 
 await step("no console errors or page errors during the run", async () => {

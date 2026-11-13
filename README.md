@@ -23,7 +23,7 @@ The current prototype includes:
 
 This is not yet the full production product. No backend, authentication, cloud synchronisation, PostgreSQL, Redis, BullMQ, scheduled delivery, browser push, connected LLM, OCR, or voice transcription is implemented. The capture parser is deterministic and runs locally; it is **not AI**. The UI clearly labels this boundary. Reminders are in-app only: they become due at a chosen time of day and appear in the notification centre while THE HAUNT is open. They are not delivered by email, push or text message, and nothing runs in the background.
 
-The initial sample commitments are fictional demo data. They are stored in the browser and can be deleted or replaced.
+Nothing is stored until you add something. Fictional demo commitments load only when you choose "Load fictional demo data", and can be deleted at any time.
 
 ## Requirements
 
@@ -48,18 +48,28 @@ npm test
 npm run build
 ```
 
-Browser smoke test (needs Chrome or Edge; set `E2E_CHANNEL=chrome` for Chrome, default is Edge):
+Browser checks (need Chrome or Edge; set `E2E_CHANNEL=chrome` for Chrome, default is Edge):
 
 ```bash
 npm run build
 npx next start -p 3100
 # in a second terminal
-npm run e2e
+npm run e2e                    # end-to-end smoke test
+node e2e/contrast.mjs          # text contrast audit (WCAG AA)
+node e2e/screenshots.mjs       # screenshots at 390, 768 and 1280 px, overflow and touch-target check
 ```
 
 ## Data storage
 
-Commitments and preferences are stored in `localStorage` in the current browser. Use **Keeper's Room → Export my data** to save a JSON backup. Clearing browser storage will remove local prototype data.
+Commitments, completion history, reminder records and preferences are stored in `localStorage` in the current browser. Nothing is sent anywhere.
+
+- **Export:** Keeper's Room → Export my data saves all of the above as a JSON file. There is **no import yet**.
+- **Delete:** Keeper's Room → Delete all my data removes everything this app stored in the browser, including corrupt-data backups and any copy from the earlier prototype.
+- Clearing browser storage also removes the data. There is no cloud copy.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE). Fonts (Cormorant Garamond, DM Sans, IBM Plex Mono) are used under the SIL Open Font License; see `docs/ASSET-REGISTER.md`.
 
 ## Kiro workflow
 

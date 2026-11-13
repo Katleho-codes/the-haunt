@@ -26,4 +26,6 @@ export class MemoryStorage {
   getItem(key: string): string | null { return this.data.get(key) ?? null; }
   setItem(key: string, value: string): void { this.data.set(key, value); }
   removeItem(key: string): void { this.data.delete(key); }
+  get length(): number { return this.data.size; }
+  key(index: number): string | null { return [...this.data.keys()][index] ?? null; }
 }

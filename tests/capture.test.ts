@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { commitmentProposalSchema, reviewNotes, type CommitmentProposal } from "@/lib/capture/proposal";
 import { parseCapture } from "@/lib/capture/deterministic-parser";
-import { extractAmounts, extractDate, extractRecurrence } from "@/lib/capture/extract";
+import { extractAmounts, extractDate, extractRecurrence, extractTimeMention } from "@/lib/capture/extract";
 import { proposalToReview, repeatFromRule } from "@/lib/capture/review";
 import { draftToCommitment } from "@/lib/domain/draft";
 
@@ -118,6 +118,46 @@ describe("amounts and currency", () => {
   });
   it("never produces an amount without a currency (schema)", () => {
     expect(commitmentProposalSchema.safeParse({ ...parse("x R5 on 1 December 2026"), currency: undefined }).success).toBe(false);
+  });
+});
+
+describe("regression: review findings M-3 and M-4", () => {
+  it("does not read a weight as money", () => {
+    expect(extractAmounts("Buy 2 pounds of sugar")).toEqual([]);
+    expect(parse("Buy 2 pounds of sugar on 25 Nov 2026").amountMinor).toBeUndefined();
+  });
+  it("flags money written as a word so the person checks it", () => {
+    const p = parse("Pay 20 pounds to the club on 25 Nov 2026");
+    expect(p).toMatchObject({ amountMinor: 2000, currency: "GBP" });
+    expect(reviewNotes(p).currency).toMatch(/pounds.*GBP.*money/i);
+    expect(reviewNotes(parse("Pay 15 euros on 25 Nov 2026")).currency).toMatch(/euros.*EUR/);
+  });
+  it("does not flag clear markers (symbol, code, rand)", () => {
+    expect(reviewNotes(parse("Pay R899 on 25 Nov 2026")).currency).toBeUndefined();
+    expect(reviewNotes(parse("Pay 899 rand on 25 Nov 2026")).currency).toBeUndefined();
+    expect(reviewNotes(parse("Pay GBP 20 on 25 Nov 2026")).currency).toBeUndefined();
+  });
+  it("tells the person a time of day was found and keeps it in the details", () => {
+    const p = parse("Dentist 25 November at 14:30");
+    expect(p.title).toBe("Dentist");
+    expect(p.dueDate).toBe("2026-11-25");
+    expect(p.description).toBe("Time mentioned in your note: 14:30");
+    expect(reviewNotes(p).general).toMatch(/14:30.*not read yet/);
+  });
+  it.each([["Call the bank at 5pm tomorrow", "5pm"], ["Meeting 5 December 2026 at 09h00", "09h00"], ["Pick up kids at 3 pm today", "3 pm"]])("finds the time in %s", (text, time) => {
+    expect(extractTimeMention(text)).toBe(time);
+    expect(reviewNotes(parse(text)).general).toContain(time);
+  });
+  it("does not mistake a date or amount for a time", () => {
+    for (const text of ["Pay R899 on 25 November 2026", "Pay on the 25th every month", "Renew on 2027-03-18", "Room 12 on 5 December 2026"]) {
+      expect(extractTimeMention(text), text).toBeUndefined();
+      expect(reviewNotes(parse(text)).general, text).toBeUndefined();
+    }
+  });
+  it("leaves a bare date out of the title", () => {
+    expect(parse("Dentist 25 November").title).toBe("Dentist");
+    expect(parse("School trip 2027-03-18").title).toBe("School trip");
+    expect(parse("Service the car 30 November 2026").title).toBe("Service the car");
   });
 });
 

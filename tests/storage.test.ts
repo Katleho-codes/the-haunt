@@ -159,6 +159,20 @@ describe("LocalStorageRepository", () => {
     expect((await repo.init("user-a")).kind).toBe("loaded");
     expect(await repo.listOccurrences("user-a")).toEqual([]);
   });
+  it("delete-all also removes corrupt-data backups and legacy copies, and only this user's", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem("the-haunt.store.v1.user-a", "{not json");
+    const repo = new LocalStorageRepository({ storage, timezone: TZ, now: fixedNow });
+    const status = await repo.init("user-a");
+    expect(status.kind).toBe("corrupt");
+    expect([...storage.data.keys()].some((k) => k.startsWith("the-haunt.corrupt.user-a."))).toBe(true);
+    storage.setItem(LEGACY_COMMITMENTS_KEY, "[]");
+    storage.setItem(LEGACY_SETTINGS_KEY, "{}");
+    storage.setItem("the-haunt.corrupt.user-b.2026-01-01T00:00:00.000Z", "other person");
+    storage.setItem("unrelated.key", "keep");
+    await repo.deleteAll("user-a");
+    expect([...storage.data.keys()].sort()).toEqual(["the-haunt.corrupt.user-b.2026-01-01T00:00:00.000Z", "unrelated.key"]);
+  });
   it("deletes all user data including legacy copies", async () => {
     const storage = new MemoryStorage();
     storage.setItem(LEGACY_COMMITMENTS_KEY, JSON.stringify([legacyItem]));

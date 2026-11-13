@@ -1,6 +1,6 @@
 # Product foundation: tasks
 
-- [ ] 1.1 Git repo now exists (owner created it); confirm `.kiro/` is tracked, and add the owner-approved LICENSE. Needs owner decision on licence.
+- [x] 1.1 Git repo exists, `.kiro/` is tracked and not ignored, and the owner-approved MIT `LICENSE` was added on 13 November 2026.
 - [x] 1.2 Pin dependency versions and re-run install, typecheck, build.
 - [x] 1.3 Add Vitest and fast-check; migrate `scripts/capture.test.cjs` to `tests/capture.test.ts`; make `npm test` run Vitest.
 - [x] 1.4 Fix the 9 lint errors without disabling rules; `npm run lint` exits 0 (one `<img>` warning remains, see 1.5).

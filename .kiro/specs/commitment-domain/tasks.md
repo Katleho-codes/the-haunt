@@ -11,6 +11,6 @@ Depends on product-foundation 1.3 (test tooling).
 - [ ] 2.7 Switch the UI to the repository and new model. Implemented in `components/haunt-app.tsx` (no separate `use-commitments` hook yet); typecheck, lint, tests and build pass; NOT yet verified in a browser.
 - [ ] 2.8 Per-currency summary. Implemented for the 7-day card using `sumByCurrency`; the monthly view is not built; not browser-verified.
 - [ ] 2.9 Add search, filters and sort to The Archive; tests for the pure functions.
-- [ ] 2.10 Archive action added to the row menu (not browser-verified); series-aware delete waits for the recurrence engine.
-- [ ] 2.11 Versioned export and delete-all with confirmation are implemented (not browser-verified). Validated import is not built.
+- [x] 2.10 Archive action, an Active/Archived list in The Archive, and Restore are done and browser-verified. Series-aware delete confirmation is covered by the delete message for recurring items; edit scopes remain unbuilt.
+- [ ] 2.11 Versioned export (commitments, history, reminders, settings) and delete-all with confirmation are done and browser-verified. Validated import is NOT built, so this task stays open.
 - [ ] 2.12 Demo data module and explicit "Load fictional demo data" actions exist and are unit-tested; the buttons are not browser-verified.

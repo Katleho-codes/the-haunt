@@ -398,3 +398,10 @@ html[data-intensity="low"] .ambient, html[data-intensity="low"] .grain, html[dat
   .icon-button.tiny, .row-more { width: 34px; height: 34px; }
   .reminder-chip, .notification-actions button, .toast-action { min-height: 32px; }
 }
+
+/* Archive tabs and data note */
+.archive-tabs { display: flex; gap: 8px; margin: 0 0 12px; }
+.archive-tab { min-height: 32px; padding: 0 12px; background: transparent; color: #a3ab98; border: 1px solid var(--line-strong); cursor: pointer; font-size: 12px; }
+.archive-tab:hover { color: var(--bone); border-color: rgba(169,189,136,.4); }
+.archive-tab-on { background: rgba(169,189,136,.12); color: var(--bone); border-color: rgba(169,189,136,.5); }
+.data-note { margin: 12px 0 0; color: #a3ab98; font-size: 11px; line-height: 1.6; }

@@ -18,12 +18,16 @@ export interface KeyValueStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+  /** Number of stored keys and the key at an index, as on the Web Storage API. Needed to find backups by prefix. */
+  readonly length: number;
+  key(index: number): string | null;
 }
 
 export const LEGACY_COMMITMENTS_KEY = "the-haunt.commitments.v1";
 export const LEGACY_SETTINGS_KEY = "the-haunt.settings.v1";
 const storeKey = (userId: string) => `the-haunt.store.v1.${userId}`;
-const corruptKey = (userId: string, nowIso: string) => `the-haunt.corrupt.${userId}.${nowIso}`;
+const CORRUPT_PREFIX = "the-haunt.corrupt.";
+const corruptKey = (userId: string, nowIso: string) => `${CORRUPT_PREFIX}${userId}.${nowIso}`;
 
 export interface LocalRepositoryOptions {
   storage: KeyValueStorage;
@@ -154,7 +158,19 @@ export class LocalStorageRepository implements CommitmentRepository {
     this.write(userId, { ...this.read(userId), settings: settingsSchema.parse(settings) });
   }
 
+  /**
+   * Remove everything stored for this user: the data, the prototype-format copy, and any corrupt-data backups
+   * (which are raw copies of what the person entered). Collect the keys first, because removing while iterating
+   * shifts the indexes.
+   */
   async deleteAll(userId: string): Promise<void> {
+    const backupPrefix = `${CORRUPT_PREFIX}${userId}.`;
+    const backups: string[] = [];
+    for (let index = 0; index < this.storage.length; index++) {
+      const key = this.storage.key(index);
+      if (key !== null && key.startsWith(backupPrefix)) backups.push(key);
+    }
+    for (const key of backups) this.storage.removeItem(key);
     this.storage.removeItem(storeKey(userId));
     this.storage.removeItem(LEGACY_COMMITMENTS_KEY);
     this.storage.removeItem(LEGACY_SETTINGS_KEY);

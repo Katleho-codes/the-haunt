@@ -22,6 +22,9 @@ const WORD_NUMBERS: Record<string, number> = { two: 2, three: 3, four: 4, five: 
 
 export interface AmountMatch { amountMinor: number; currency: string; assumed?: string }
 
+/** Currency written as a word is less certain than a symbol or a code, so it is always flagged for review. */
+const WORD_MARKERS = new Set(["dollar", "dollars", "euro", "euros", "pound", "pounds"]);
+
 const NUMBER = String.raw`\d{1,3}(?:[ ,]\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?`;
 const MARKERS: Record<string, { currency: string; assumed?: string }> = {
   r: { currency: "ZAR" }, rand: { currency: "ZAR" }, rands: { currency: "ZAR" }, zar: { currency: "ZAR" },
@@ -37,13 +40,17 @@ const MARKERS: Record<string, { currency: string; assumed?: string }> = {
 export function extractAmounts(text: string): AmountMatch[] {
   const found: AmountMatch[] = [];
   const before = new RegExp(String.raw`(?<![A-Za-z0-9])(R|ZAR|USD|EUR|GBP|\$|€|£)\s?(${NUMBER})(?![\d])`, "gi");
-  const after = new RegExp(String.raw`(?<![\d.,])(${NUMBER})\s?(rands?|ZAR|USD|EUR|GBP|dollars?|euros?|pounds?)\b`, "gi");
+  // "2 pounds of sugar" is a weight, not money: a word currency followed by "of" is ignored.
+  const after = new RegExp(String.raw`(?<![\d.,])(${NUMBER})\s?(rands?|ZAR|USD|EUR|GBP|dollars?|euros?|pounds?)\b(?!\s+of\b)`, "gi");
   const add = (number: string, marker: string) => {
     const info = MARKERS[marker.toLowerCase()];
     if (!info) return;
     const major = Number(number.replace(/[ ,]/g, ""));
     if (!Number.isFinite(major)) return;
-    found.push({ amountMinor: toMinor(major, info.currency), currency: info.currency, assumed: info.assumed });
+    const wordNote = WORD_MARKERS.has(marker.toLowerCase()) && !info.assumed
+      ? `"${marker}" was read as ${info.currency}. Check that this is money.`
+      : undefined;
+    found.push({ amountMinor: toMinor(major, info.currency), currency: info.currency, assumed: info.assumed ?? wordNote });
   };
   for (const match of text.matchAll(before)) add(match[2], match[1]);
   for (const match of text.matchAll(after)) add(match[1], match[2]);
@@ -54,6 +61,14 @@ export function extractAmounts(text: string): AmountMatch[] {
     seen.add(key);
     return true;
   });
+}
+
+// ---------- time of day ----------
+
+/** Times are not turned into a due time yet. They are found so the person can be told, instead of losing them silently. */
+export function extractTimeMention(text: string): string | undefined {
+  const match = text.match(/\b(?:at\s+)?((?:[01]?\d|2[0-3])[:h][0-5]\d\s?(?:am|pm)?|(?:1[0-2]|0?[1-9])\s?(?:am|pm))\b/i);
+  return match ? match[1].trim() : undefined;
 }
 
 // ---------- recurrence ----------
@@ -217,8 +232,9 @@ const VERB_START = /^(renew|pay|book|call|buy|submit|send|check|review|sort|serv
 const FILLER = /^(?:please\s+)?(?:remind me to|remember to|don'?t forget to|i need to|i must|i have to|need to|have to|i should)\s+/i;
 const ARTICLE = /^(?:my|the|our|a|an)\s+/i;
 const DATE_CUE = String.raw`(?:the\s+)?(?:\d|R\s?\d|\$|€|£|(?:${MONTH_NAMES})\b|sunday|monday|tuesday|wednesday|thursday|friday|saturday|today|tomorrow|next|end\b|a\s+few\b)`;
+const BARE_DATE = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTH_NAMES})\b|(?:${MONTH_NAMES})\s+\d{1,2}\b|20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}[/.]\d{1,2}[/.]20\d{2})`;
 const CUT = new RegExp(
-  String.raw`\s+(?:(?:on|in|by|before|until|from|for|at|every|each)\s+(?=${DATE_CUE})|(?:is|are|was|will be|expires?|expiring|due|monthly|weekly|daily|annually|yearly|quarterly|fortnightly)\b|[,(]|(?:R|\$|€|£)\s?\d)`,
+  String.raw`\s+(?:(?=${BARE_DATE})|(?:on|in|by|before|until|from|for|at|every|each)\s+(?=${DATE_CUE})|(?:is|are|was|will be|expires?|expiring|due|monthly|weekly|daily|annually|yearly|quarterly|fortnightly)\b|[,(]|(?:R|\$|€|£)\s?\d)`,
   "i",
 );
 
