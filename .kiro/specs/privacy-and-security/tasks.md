@@ -5,6 +5,6 @@
 - [ ] 8.3 Add the secrets/unsafe-HTML check script and run it.
 - [x] 8.4 `.env.example` now uses `USER:PASSWORD` placeholders.
 - [ ] 8.5 Add security headers in `next.config.ts`; verify on a production build.
-- [ ] 8.6 Write the privacy notice page: what is stored, where, what is never sent.
+- [ ] 8.6 `docs/PRIVACY-NOTES.md` is written (what is stored, where, what is never sent). It is a document in the repo, not a page in the app, and has not been legally reviewed; left open until it is linked from the app.
 - [ ] 8.7 Review the whole app for logged user content and for claims that exceed implementation.
 - [ ] 8.8 Run the quality-guardian agent for an independent privacy review; record findings.

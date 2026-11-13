@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `public/haunted-manor.svg` | Original vector environment | Created in this project | Original project artwork |
 | Grain texture | Inline SVG filter | Created in CSS | Original project artwork |
-| Cormorant Garamond, DM Sans, IBM Plex Mono | Web fonts | Google Fonts, fetched at build time and self-hosted by `next/font`. Visitors' browsers make no request to Google (checked by the browser smoke test on 13 November 2026). | SIL Open Font License 1.1 as published by Google Fonts. The licence texts have not yet been copied into the repository: do that before release. Fallbacks (Georgia, Arial, Courier New) are defined. |
+| Cormorant Garamond, DM Sans, IBM Plex Mono | Web fonts | Google Fonts, fetched at build time and self-hosted by `next/font`. Visitors' browsers make no request to Google (checked by the browser smoke test on 13 November 2026). | SIL Open Font License 1.1 as published by Google Fonts. Licence texts are in `docs/licenses/` (copied from the Google Fonts repository on 13 November 2026). Fallbacks (Georgia, Arial, Courier New) are defined. |
 | Fog, firefly and candlelight-inspired effects | CSS | Created in this project | Original project effects |
 | Ambient room tone and chimes | Web Audio API synthesis | Generated at runtime by project code | Original generated tones; no downloaded recording |
 | `app/icon.svg` | Favicon | Copy of `public/haunt-icon.svg` | Original project artwork. The owner still needs to confirm the provenance of the icon itself. |

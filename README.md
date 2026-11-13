@@ -19,6 +19,14 @@ The current prototype includes:
 - Browser-local persistence and JSON export.
 - Kiro steering, feature specs and a quality-check hook scaffold.
 
+## How this project was made (disclosure)
+
+The repository was assembled on 13 November 2026, inside the Kiroween 2026 submission period. Its **initial scaffold was generated with ChatGPT assistance outside Kiro** (first commit `4ef06ab`). All later work (domain model, recurrence, reminders, capture review, the cinematic layer, tests, browser checks, an independent review and its fixes) was done in Kiro IDE agent sessions. What Kiro was and was not used for is recorded in [`docs/KIRO-USAGE-LOG.md`](docs/KIRO-USAGE-LOG.md); hooks, MCP and Powers have not been used, and Kiro's spec task runner was not used. Standard open-source libraries are used (Next.js, React, Zod, Lucide, Vitest, fast-check, playwright-core).
+
+## Try it as a judge
+
+No login is needed. Open the app, then press **load fictional demo data** (in the empty-state banner or in The Keeper's Room). A suggested walk-through is in [`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md). Everything stays in your own browser. To reset, use **The Keeper's Room → Delete all my data**. Deployed URL: _not yet deployed_.
+
 ## Important prototype boundaries
 
 This is not yet the full production product. No backend, authentication, cloud synchronisation, PostgreSQL, Redis, BullMQ, scheduled delivery, browser push, connected LLM, OCR, or voice transcription is implemented. The capture parser is deterministic and runs locally; it is **not AI**. The UI clearly labels this boundary. Reminders are in-app only: they become due at a chosen time of day and appear in the notification centre while THE HAUNT is open. They are not delivered by email, push or text message, and nothing runs in the background.

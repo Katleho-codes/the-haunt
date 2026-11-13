@@ -13,6 +13,9 @@ Only work that was actually done with Kiro is listed. Configuration files existi
 | 2026-11-13 | Kiro IDE agent session (Vibe) | Prompt 2: added Vitest/fast-check/Zod, domain and storage modules with tests, migrated the UI to the repository, fixed lint errors. Specs referenced: product-foundation, commitment-domain (tasks 1.2-1.4, 2.1-2.6 verified; 2.7-2.12 implemented, unverified in browser). Spec tasks were not run through Kiro's task runner and the new hook did not fire. | commits (when made), test output, spec task notes |
 | 2026-11-13 | Kiro IDE agent session (Vibe) | Prompt 3: recurrence engine (rule schema, generation, series history, zoned conversion) with example and property tests; wired into the UI. Spec: recurrence-engine tasks 3.1-3.8, 3.12 verified; 3.9-3.11 partial. Task runner and hooks not used. | tests/recurrence.test.ts, zoned.test.ts, series.test.ts |
 
+## Project provenance
+The repository was assembled on 13 November 2026, within the submission period. Its initial scaffold (first commit `4ef06ab`) was generated with ChatGPT assistance outside Kiro and is not attributed to Kiro. The owner still needs to confirm exactly which files that commit contained and who made each. Everything listed in this log happened afterwards.
+
 ## Not yet used
 MCP servers, Powers, Kiro Crew, spec task execution, hook runs, custom agent runs. Do not claim these until they happen.
 
@@ -30,3 +33,6 @@ First real run of a custom Kiro agent: the `quality-guardian` sub-agent was invo
 
 ### Addendum, 13 November 2026 (fixes after Prompt 7)
 Kiro IDE agent session (Vibe): fixed the review findings H-1, H-2, H-3, M-1 to M-4, L-1, L-2, L-4 to L-6 (details in section 9 of `docs/REVIEW-2026-11-13.md`), added regression tests, and extended the browser smoke test to 30 steps including an accessible-name sweep. Mutation checks were run with a throwaway script: one earlier attempt overlapped with a second run and briefly left the source file in a mutated state; it was found, restored, and the checks were rerun sequentially. Hooks, the spec task runner and the quality-guardian re-review were not used for these fixes. Evidence: `tests/export.test.ts`, `tests/capture.test.ts`, `tests/storage.test.ts`, `e2e/smoke.mjs`.
+
+### Addendum, 13 November 2026 (Prompt 8: release readiness)
+Kiro IDE agent session (Vibe): read the official rules and compared them with the repository; checked that `.kiro/` is tracked and not ignored; found the GitHub repository is not publicly reachable; downloaded the three font licence texts into `docs/licenses/`; wrote `docs/RELEASE-CHECKLIST.md`, `docs/KIRO-WRITEUP-DRAFT.md`, `docs/DEMO-SCRIPT.md` and `docs/PRIVACY-NOTES.md`; added the provenance disclosure to the README and this log. Nothing was deployed, recorded or submitted. Hooks, the spec task runner, MCP and Powers were not used. Evidence: the four new docs and `docs/RELEASE-CHECKLIST.md` section 0 to 1.
