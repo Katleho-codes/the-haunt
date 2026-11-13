@@ -1,4 +1,4 @@
-import type { Commitment, Occurrence, Settings } from "@/lib/domain/schema";
+import type { Commitment, Occurrence, ReminderInstance, Settings } from "@/lib/domain/schema";
 
 /**
  * Persistence boundary. Every call takes a userId so a server-backed
@@ -15,6 +15,9 @@ export interface CommitmentRepository {
   /** Completed occurrences of recurring commitments. Removed together with their commitment. */
   listOccurrences(userId: string): Promise<Occurrence[]>;
   replaceOccurrences(userId: string, occurrences: Occurrence[]): Promise<void>;
+  /** In-app reminder instances (ids, dates and states only). Removed together with their commitment. */
+  listReminders(userId: string): Promise<ReminderInstance[]>;
+  replaceReminders(userId: string, reminders: ReminderInstance[]): Promise<void>;
   getSettings(userId: string): Promise<Settings>;
   saveSettings(userId: string, settings: Settings): Promise<void>;
   /** Remove every record and setting for this user. */

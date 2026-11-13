@@ -133,6 +133,25 @@ describe("LocalStorageRepository", () => {
     await repo.remove("user-a", "c-1");
     expect(await repo.listOccurrences("user-a")).toEqual([]);
   });
+  it("stores reminder instances per user and removes them with their commitment", async () => {
+    const { repo } = make();
+    await repo.save("user-a", makeCommitment());
+    const reminder = { id: "c-1:2026-11-25:1", userId: "user-a", commitmentId: "c-1", dueDate: "2026-11-25", offsetDays: 1, fireAt: "2026-11-24T07:00:00.000Z", state: "scheduled" as const };
+    await repo.replaceReminders("user-a", [reminder]);
+    expect(await repo.listReminders("user-a")).toEqual([reminder]);
+    expect(await repo.listReminders("user-b")).toEqual([]);
+    await expect(repo.replaceReminders("user-b", [reminder])).rejects.toThrow();
+    await expect(repo.replaceReminders("user-a", [{ ...reminder, state: "delivered" as never }])).rejects.toThrow();
+    await repo.remove("user-a", "c-1");
+    expect(await repo.listReminders("user-a")).toEqual([]);
+  });
+  it("gives older saved settings the new reminder defaults", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem("the-haunt.store.v1.user-a", JSON.stringify({ version: 1, userId: "user-a", commitments: [], settings: { currency: "ZAR" } }));
+    const repo = new LocalStorageRepository({ storage, timezone: TZ, now: fixedNow });
+    await repo.init("user-a");
+    expect(await repo.getSettings("user-a")).toMatchObject({ reminderTime: "09:00", defaultReminderOffsets: [3, 1], effects: false, ambience: false });
+  });
   it("loads data saved before occurrences existed", async () => {
     const storage = new MemoryStorage();
     storage.setItem("the-haunt.store.v1.user-a", JSON.stringify({ version: 1, userId: "user-a", commitments: [makeCommitment()], settings: {} }));

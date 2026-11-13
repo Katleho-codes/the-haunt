@@ -14,7 +14,7 @@ Phase A is deterministic text capture only, labelled as deterministic and not AI
 - WHEN the text says "expires in March" with no day or year THEN `dueDate` SHALL be absent and `needsReview` SHALL include `dueDate`.
 - WHEN the text names a day of month that does not exist in the next month (for example the 31st) THEN the proposal SHALL keep `dayOfMonth: 31` and SHALL NOT change it to another day.
 - WHEN a number has no currency symbol or code THEN it SHALL NOT become an amount. "for 3 weeks" SHALL NOT yield an amount.
-- WHEN a currency is not stated THEN the proposal SHALL use the user's preferred currency only if an amount exists, and SHALL list `currency` in `needsReview`.
+- WHEN a number has no currency marker THEN it SHALL be ignored, so an amount always carries a stated currency. WHEN the marker is ambiguous (a dollar sign) THEN the assumed currency SHALL be listed in `needsReview`.
 - WHEN a monthly bill has a day but no month THEN `needsReview` SHALL include a note to confirm the next due date.
 
 ### Requirement 3: Expected parses

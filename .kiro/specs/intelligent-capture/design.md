@@ -17,3 +17,11 @@ Review panel shows each field, a text tag "Check this" for fields in `needsRevie
 
 ## Phase B notes
 Server route (Next route handler) calls the provider with a timeout and a size limit on input. No client-side secrets. Not started until the owner approves a provider and consent copy.
+
+## Implemented design (13 November 2026, Phase A only)
+- `lib/capture/proposal.ts`: Zod `commitmentProposalSchema` and `reviewNotes`. `needsReview` entries are written "field: note". A missing due date must be listed there.
+- `lib/capture/extract.ts`: extractors for amounts (currency marker required), recurrence, dates, type and title. `lib/capture/deterministic-parser.ts` composes them with an injected clock and timezone, and validates its own output.
+- `lib/capture/review.ts`: turns a proposal into the editable form. Repeat patterns the form cannot express (daily, weekday lists, unusual intervals) are reported in the review notes instead of being dropped silently.
+- The note is shown during review (`sourceSummary`) but is not copied into the saved Details, so it cannot go stale.
+- Values the reader had to work out (for example "the 25th every month" to the next 25th) are flagged "Check this". Editing a flagged field clears its marker.
+- Phase B (LLM adapter, consent, server route) and Phase C (files, OCR, voice) are not started. No capture code calls any network service.

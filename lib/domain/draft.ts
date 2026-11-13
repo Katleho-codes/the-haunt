@@ -1,4 +1,4 @@
-import { parseDateOnly, todayIn, type DateOnly } from "@/lib/domain/dates";
+import { parseDateOnly, type DateOnly } from "@/lib/domain/dates";
 import { fromMinor, toMinor } from "@/lib/domain/money";
 import {
   commitmentSchema,
@@ -19,13 +19,15 @@ export interface CommitmentDraft {
   type: CommitmentType;
   dueDate: DateOnly | "";
   repeat: RepeatChoice;
+  /** Day of month a monthly or quarterly rule should keep (for example 31 when the first date was clamped). */
+  dayOfMonth?: number;
   amount: string; // major units, as typed
   currency: string;
   reminderOffsetsDays: number[];
 }
 
-export function ruleFromChoice(choice: RepeatChoice, dueDate: DateOnly): RecurrenceRule | undefined {
-  const { day } = parseDateOnly(dueDate);
+export function ruleFromChoice(choice: RepeatChoice, dueDate: DateOnly, dayOfMonth?: number): RecurrenceRule | undefined {
+  const day = dayOfMonth ?? parseDateOnly(dueDate).day;
   switch (choice) {
     case "weekly": return { frequency: "weekly", interval: 1, startDate: dueDate };
     case "fortnightly": return { frequency: "weekly", interval: 2, startDate: dueDate };
@@ -113,7 +115,7 @@ export function draftToCommitment(draft: CommitmentDraft, context: DraftContext)
     timezone: existing?.timezone ?? context.timezone,
     amountMinor,
     currency: amountMinor === undefined ? undefined : draft.currency,
-    recurrence: keepExistingRule ? existing?.recurrence : ruleFromChoice(draft.repeat, draft.dueDate),
+    recurrence: keepExistingRule ? existing?.recurrence : ruleFromChoice(draft.repeat, draft.dueDate, draft.dayOfMonth),
     reminderOffsetsDays: [...draft.reminderOffsetsDays].sort((a, b) => b - a),
     sourceType: existing?.sourceType ?? context.sourceType ?? "manual",
     createdAt: existing?.createdAt ?? context.nowIso,
@@ -123,33 +125,4 @@ export function draftToCommitment(draft: CommitmentDraft, context: DraftContext)
   return parsed.success
     ? { ok: true, value: parsed.data }
     : { ok: false, errors: parsed.error.issues.map((issue) => issue.message) };
-}
-
-/** Prototype parser output (see lib/capture.ts) as a form draft. Missing values stay missing. */
-export interface LegacyProposal {
-  title: string;
-  category: string;
-  dueAt: string | null;
-  recurrence: RepeatChoice;
-  amount: number | null;
-  currency: string;
-  description: string;
-}
-
-const CATEGORY_TYPE: Record<string, CommitmentType> = {
-  payment: "bill", subscription: "subscription", appointment: "appointment", renewal: "renewal",
-  household: "household", work: "work", personal: "custom",
-};
-
-export function draftFromProposal(proposal: LegacyProposal, timezone: string): CommitmentDraft {
-  return {
-    title: proposal.title,
-    description: proposal.description,
-    type: CATEGORY_TYPE[proposal.category] ?? "custom",
-    dueDate: proposal.dueAt ? todayIn(timezone, new Date(proposal.dueAt)) : "",
-    repeat: proposal.recurrence,
-    amount: proposal.amount === null ? "" : String(proposal.amount),
-    currency: proposal.currency,
-    reminderOffsetsDays: [3, 1],
-  };
 }

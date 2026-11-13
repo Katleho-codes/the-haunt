@@ -58,3 +58,25 @@ Implemented and unit-tested: calendar recurrence for daily, weekly (optionally b
 Implemented in the UI, NOT verified in a browser: completing a recurring item advances it and records history; The Crypt lists completed occurrences; The Clocktower shows the next three dates.
 
 Not implemented: edit scopes 'this occurrence' and 'this and future', pause, weekday picker, interval picker (the form offers the six fixed patterns), reminders.
+
+## Update 13 November 2026 (Prompt 4: reminders, plus first browser verification)
+
+Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warning), `npm test` (11 files, 120 tests pass), production build (pass), and `npm run e2e`: 15 browser steps in Microsoft Edge against a production build with a controlled clock, all passing.
+
+The browser run also verified earlier UI work for the first time: demo data on request, persistence across reload, completing a recurring item, history in The Crypt, undo, Clocktower next dates, row-menu hover layering, no horizontal scroll at 390px on the five views, sound off by default, delete-all, and no console errors.
+
+Reminders (in-app only): configurable time of day and default offsets in The Keeper's Room; reminders become due when their time arrives; a bell with a count; a notification centre with NEW/SEEN, snooze (1 hour or tomorrow), dismiss, open, and a clearly labelled test reminder. They only appear while THE HAUNT is open. There is no email, push, text-message or background delivery, and the UI says so.
+
+Still not built: browser push, email, a provider-backed delivery state model, reminders for `dueTime`, sound on new reminders. The e2e script ran on one browser (Edge) at two viewport sizes; it is not an accessibility audit.
+
+## Update 13 November 2026 (Prompt 5: intelligent capture, Phase A)
+
+Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warning), `npm test` (11 files, 153 tests pass), production build (pass), `npm run e2e` (17 browser steps in Edge, all pass, including two capture steps).
+
+Implemented: a validated proposal schema; a rule-based reader (clearly labelled "not AI" in the review step) with an injected clock; a review form with CHECK THIS markers and a list of notes; nothing is saved until the user confirms; the saved record carries the user's edits and source type `pasted_text`.
+
+Audit defects fixed with regression tests: "for 3 weeks" no longer produces an amount; "the 31st every month" keeps day 31 (the first date is the last day of a short month, flagged); the old "the 25th" only worked with "monthly".
+
+The reader does not invent dates: "expires in March" leaves the date empty and the form cannot be saved until one is chosen. It does work out some values (the next "25th", "tomorrow", an assumed year) and always flags them.
+
+Not built: any LLM or other external extraction, consent screens, file/OCR/voice capture (specs 5.9 to 5.13). The reader handles short English notes only; it does not handle other languages, times of day, or multiple commitments in one note.

@@ -1,10 +1,12 @@
 import {
   commitmentSchema,
   occurrenceSchema,
+  reminderInstanceSchema,
   settingsSchema,
   storedDataSchema,
   type Commitment,
   type Occurrence,
+  type ReminderInstance,
   type Settings,
   type StoredData,
 } from "@/lib/domain/schema";
@@ -78,6 +80,7 @@ export class LocalStorageRepository implements CommitmentRepository {
       userId,
       commitments: migrated.commitments,
       occurrences: [],
+      reminders: [],
       settings: migrateLegacySettings(legacySettings, this.timezone),
     });
     // Legacy keys are left in place as a backup until the user confirms.
@@ -107,7 +110,7 @@ export class LocalStorageRepository implements CommitmentRepository {
     const next = data.commitments.filter((item) => item.id !== id);
     if (next.length === data.commitments.length) return false;
     // Deleting a commitment also deletes its completion history.
-    this.write(userId, { ...data, commitments: next, occurrences: data.occurrences.filter((entry) => entry.commitmentId !== id) });
+    this.write(userId, { ...data, commitments: next, occurrences: data.occurrences.filter((entry) => entry.commitmentId !== id), reminders: data.reminders.filter((entry) => entry.commitmentId !== id) });
     return true;
   }
 
@@ -129,6 +132,18 @@ export class LocalStorageRepository implements CommitmentRepository {
       return occurrenceSchema.parse(entry);
     });
     this.write(userId, { ...this.read(userId), occurrences: valid });
+  }
+
+  async listReminders(userId: string): Promise<ReminderInstance[]> {
+    return this.read(userId).reminders.filter((entry) => entry.userId === userId);
+  }
+
+  async replaceReminders(userId: string, reminders: ReminderInstance[]): Promise<void> {
+    const valid = reminders.map((entry) => {
+      if (entry.userId !== userId) throw new Error("Reminder belongs to a different user");
+      return reminderInstanceSchema.parse(entry);
+    });
+    this.write(userId, { ...this.read(userId), reminders: valid });
   }
 
   async getSettings(userId: string): Promise<Settings> {
@@ -157,7 +172,7 @@ export class LocalStorageRepository implements CommitmentRepository {
   private read(userId: string): StoredData {
     const raw = this.storage.getItem(storeKey(userId));
     const parsed = raw === null ? undefined : this.parse(raw);
-    return parsed ?? { version: 1, userId, commitments: [], occurrences: [], settings: settingsSchema.parse({ timezone: this.timezone }) };
+    return parsed ?? { version: 1, userId, commitments: [], occurrences: [], reminders: [], settings: settingsSchema.parse({ timezone: this.timezone }) };
   }
 
   private write(userId: string, data: StoredData): void {

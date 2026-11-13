@@ -94,6 +94,28 @@ export const occurrenceSchema = z.object({
 });
 export type Occurrence = z.infer<typeof occurrenceSchema>;
 
+/**
+ * In-app reminder lifecycle. These words describe what THE HAUNT did, not what a provider delivered:
+ * scheduled (waiting) > due (time reached, not yet seen) > shown (listed in the notification centre)
+ * > dismissed, or snoozed (back to due later), or cancelled (the commitment changed).
+ */
+export const REMINDER_STATES = ["scheduled", "due", "shown", "snoozed", "dismissed", "cancelled"] as const;
+export const reminderInstanceSchema = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+  commitmentId: z.string().min(1),
+  /** The occurrence this reminder is for. No title, amount or notes are stored here. */
+  dueDate: dateOnlySchema,
+  offsetDays: z.number().int().min(0).max(365),
+  fireAt: z.string().datetime(),
+  state: z.enum(REMINDER_STATES),
+  snoozedUntil: z.string().datetime().optional(),
+  shownAt: z.string().datetime().optional(),
+  dismissedAt: z.string().datetime().optional(),
+});
+export type ReminderInstance = z.infer<typeof reminderInstanceSchema>;
+export type ReminderState = (typeof REMINDER_STATES)[number];
+
 export type Commitment = z.infer<typeof commitmentSchema>;
 export type CommitmentType = (typeof COMMITMENT_TYPES)[number];
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
@@ -106,6 +128,10 @@ export const settingsSchema = z.object({
   effects: z.boolean().default(false),
   volume: z.number().min(0).max(1).default(0.24),
   reduceMotion: z.boolean().default(false),
+  /** Time of day reminders appear, in the profile timezone. */
+  reminderTime: localTimeSchema.default("09:00"),
+  /** Days before the due date, used for new commitments. */
+  defaultReminderOffsets: z.array(z.number().int().min(0).max(365)).max(10).default([3, 1]),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -114,6 +140,7 @@ export const storedDataSchema = z.object({
   userId: z.string().min(1),
   commitments: z.array(commitmentSchema),
   occurrences: z.array(occurrenceSchema).default([]),
+  reminders: z.array(reminderInstanceSchema).default([]),
   settings: settingsSchema,
 });
 export type StoredData = z.infer<typeof storedDataSchema>;

@@ -21,7 +21,7 @@ The current prototype includes:
 
 ## Important prototype boundaries
 
-This is not yet the full production product. No backend, authentication, cloud synchronisation, PostgreSQL, Redis, BullMQ, scheduled delivery, browser push, connected LLM, OCR, or voice transcription is implemented. The capture parser is deterministic and runs locally; it is **not AI**. The UI clearly labels this boundary. Reminder preferences are stored, but they are not yet delivered by a background service.
+This is not yet the full production product. No backend, authentication, cloud synchronisation, PostgreSQL, Redis, BullMQ, scheduled delivery, browser push, connected LLM, OCR, or voice transcription is implemented. The capture parser is deterministic and runs locally; it is **not AI**. The UI clearly labels this boundary. Reminders are in-app only: they become due at a chosen time of day and appear in the notification centre while THE HAUNT is open. They are not delivered by email, push or text message, and nothing runs in the background.
 
 The initial sample commitments are fictional demo data. They are stored in the browser and can be deleted or replaced.
 
@@ -44,7 +44,17 @@ Open http://localhost:3000.
 ```bash
 npm run typecheck
 npm run lint
+npm test
 npm run build
+```
+
+Browser smoke test (needs Chrome or Edge; set `E2E_CHANNEL=chrome` for Chrome, default is Edge):
+
+```bash
+npm run build
+npx next start -p 3100
+# in a second terminal
+npm run e2e
 ```
 
 ## Data storage

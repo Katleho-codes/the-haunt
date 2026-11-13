@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDemoCommitments } from "@/lib/domain/demo-data";
 import {
-  choiceFromRule, draftFromCommitment, draftFromProposal, draftToCommitment, emptyDraft, ruleFromChoice,
+  choiceFromRule, draftFromCommitment, draftToCommitment, emptyDraft, ruleFromChoice,
   type CommitmentDraft,
 } from "@/lib/domain/draft";
 import { dueLabel, recurrenceLabel } from "@/lib/domain/present";
@@ -53,15 +53,6 @@ describe("draft to commitment", () => {
     for (const choice of ["none", "weekly", "fortnightly", "monthly", "quarterly", "yearly"] as const) {
       expect(choiceFromRule(ruleFromChoice(choice, "2026-11-25"))).toBe(choice);
     }
-  });
-});
-
-describe("proposal to draft", () => {
-  it("uses the profile timezone for the calendar day and leaves a missing date empty", () => {
-    const late = { title: "x", category: "payment", dueAt: "2026-11-24T23:30:00.000Z", recurrence: "monthly" as const, amount: 899, currency: "ZAR", description: "" };
-    expect(draftFromProposal(late, "Africa/Johannesburg").dueDate).toBe("2026-11-25");
-    expect(draftFromProposal(late, "Africa/Johannesburg").type).toBe("bill");
-    expect(draftFromProposal({ ...late, dueAt: null }, "UTC").dueDate).toBe("");
   });
 });
 

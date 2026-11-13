@@ -15,3 +15,9 @@ Only work that was actually done with Kiro is listed. Configuration files existi
 
 ## Not yet used
 MCP servers, Powers, Kiro Crew, spec task execution, hook runs, custom agent runs. Do not claim these until they happen.
+
+### Addendum, 13 November 2026 (Prompt 4)
+Kiro IDE agent session (Vibe): in-app reminders (plan, reconcile, states, notification centre, settings) with unit and property tests; added a playwright-core browser smoke test and ran it in Edge. Spec reminders-and-notifications: tasks 4.1-4.8 and 4.10 verified, 4.9 not built. Spec task runner and hooks were not used. Evidence: `tests/reminders.test.ts`, `e2e/smoke.mjs`.
+
+### Addendum, 13 November 2026 (Prompt 5)
+Kiro IDE agent session (Vibe): rebuilt text capture as a validated proposal/review workflow (`lib/capture/`), fixed the two parser defects from the audit with regression tests, added example and property tests, and extended the browser smoke test with two capture steps. Spec intelligent-capture: tasks 5.1-5.8 verified; 5.9-5.13 not started. Spec task runner and hooks were not used. Evidence: `tests/capture.test.ts`, `e2e/smoke.mjs`.

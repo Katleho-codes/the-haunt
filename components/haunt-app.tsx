@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
-  Archive, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight,
+  Archive, Bell, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight,
   CircleDollarSign, Clock3, CloudMoon, Ghost, House, Plus, Search,
   Settings2, Shield, Sparkles, SunMoon, Volume2, VolumeX, WandSparkles, X,
   AlertTriangle, ArrowUpRight, MoreHorizontal, CalendarClock, FileText, Mic,
@@ -11,22 +11,29 @@ import {
   SlidersHorizontal, Download, Menu,
 } from "lucide-react";
 import type { ViewId } from "@/lib/types";
-import { parseCapture } from "@/lib/capture";
+import { parseCapture } from "@/lib/capture/deterministic-parser";
+import { proposalToReview, type ProposalReview } from "@/lib/capture/review";
 import { archiveCommitment, completeCommitment as completeItem, filterCommitments, groupForHall, restoreCommitment as restoreItem } from "@/lib/domain/commitments";
 import { buildDemoCommitments } from "@/lib/domain/demo-data";
 import { formatDateOnly, todayIn } from "@/lib/domain/dates";
 import {
-  draftFromCommitment, draftFromProposal, draftToCommitment, emptyDraft, type CommitmentDraft, type RepeatChoice,
+  draftFromCommitment, draftToCommitment, emptyDraft, type CommitmentDraft, type RepeatChoice,
 } from "@/lib/domain/draft";
 import { formatMoney, sumByCurrency } from "@/lib/domain/money";
 import { dueLabel, recurrenceLabel, TYPE_LABELS } from "@/lib/domain/present";
-import { COMMITMENT_TYPES, settingsSchema, type Commitment, type CommitmentType, type Occurrence, type Settings } from "@/lib/domain/schema";
+import { COMMITMENT_TYPES, settingsSchema, type Commitment, type CommitmentType, type Occurrence, type ReminderInstance, type Settings } from "@/lib/domain/schema";
 import { completeOccurrence, nextDates, undoLatestCompletion } from "@/lib/recurrence/series";
+import { zonedDateTimeToInstant } from "@/lib/recurrence/zoned";
+import { reconcileReminders } from "@/lib/reminders/reconcile";
+import { dismissReminder, evaluateReminders, isUnseen, isVisible, markShown, snoozeReminder } from "@/lib/reminders/state";
+import { NotificationCentre, type SnoozeChoice } from "@/components/notification-centre";
 import { addDays } from "@/lib/domain/dates";
 import { LocalStorageRepository } from "@/lib/storage/local-storage-repository";
 import type { LoadStatus } from "@/lib/storage/repository";
 
 const LOCAL_USER = "local";
+const CHECK_LABELS: Record<string, string> = { title: "Name", type: "Category", dueDate: "Due date", amountMinor: "Amount", currency: "Currency", recurrence: "Repeat", general: "Note" };
+type ProposalState = ProposalReview & { parser: "deterministic" | "llm"; sourceSummary?: string };
 const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Johannesburg";
 const defaultSettings: Settings = settingsSchema.parse({});
 const categoryLabels = TYPE_LABELS;
@@ -106,13 +113,16 @@ function useHauntSound(storedSettings: Settings) {
 export default function HauntApp() {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const [reminderBase, setReminderBase] = useState<ReminderInstance[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [showTestReminder, setShowTestReminder] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [view, setView] = useState<ViewId>("today");
   const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Commitment | null>(null);
   const [quickText, setQuickText] = useState("");
-  const [proposal, setProposal] = useState<{ draft: CommitmentDraft; confidence: "high" | "medium" | "low" } | null>(null);
+  const [proposal, setProposal] = useState<ProposalState | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>({ kind: "empty" });
   const [now, setNow] = useState(() => new Date());
   const [toast, setToast] = useState<string | null>(null);
@@ -131,11 +141,12 @@ export default function HauntApp() {
     let cancelled = false;
     (async () => {
       const status = await repository.init(LOCAL_USER);
-      const [items, history, stored] = await Promise.all([repository.list(LOCAL_USER), repository.listOccurrences(LOCAL_USER), repository.getSettings(LOCAL_USER)]);
+      const [items, history, storedReminders, stored] = await Promise.all([repository.list(LOCAL_USER), repository.listOccurrences(LOCAL_USER), repository.listReminders(LOCAL_USER), repository.getSettings(LOCAL_USER)]);
       if (cancelled) return;
       setLoadStatus(status);
       setCommitments(items);
       setOccurrences(history);
+      setReminderBase(storedReminders);
       setSettings(stored);
       setHydrated(true);
     })();
@@ -166,6 +177,20 @@ export default function HauntApp() {
   }, [toast]);
 
   const today = todayIn(settings.timezone, now);
+  // Reminders are derived: stored instances reconciled with the commitments and evaluated against the clock.
+  const reminders = useMemo(
+    () => evaluateReminders(reconcileReminders(reminderBase, commitments, { timezone: settings.timezone, reminderTime: settings.reminderTime }, now), now),
+    [reminderBase, commitments, settings.timezone, settings.reminderTime, now],
+  );
+  // Fold the derived result back into state so a reminder planned earlier is not lost once its time passes.
+  // This is the documented "adjust state while rendering" pattern; it stops as soon as the two are identical.
+  if (hydrated && reminders !== reminderBase) setReminderBase(reminders);
+  const visibleReminders = useMemo(() => reminders.filter(isVisible), [reminders]);
+  const unseenReminders = useMemo(() => reminders.filter(isUnseen).length, [reminders]);
+  useEffect(() => {
+    if (!hydrated || !repository) return;
+    void repository.replaceReminders(LOCAL_USER, reminders);
+  }, [reminders, hydrated, repository]);
   const groups = useMemo(() => groupForHall(commitments, today), [commitments, today]);
   const active = useMemo(() => commitments.filter((item) => item.status === "active"), [commitments]);
   const overdue = groups.overdue;
@@ -191,6 +216,32 @@ export default function HauntApp() {
   }, [active, completed, recurring, searchText, view]);
 
   function notify(message: string) { setToast(message); }
+  // Reminders only become "shown" once the centre has listed them: new ones read NEW while it is open
+  // and are recorded as shown when it closes.
+  function openNotifications() { setNotificationsOpen(true); }
+  function closeNotifications() {
+    setReminderBase((current) => {
+      const nowDate = new Date();
+      const settled = evaluateReminders(reconcileReminders(current, commitments, { timezone: settings.timezone, reminderTime: settings.reminderTime }, nowDate), nowDate);
+      return markShown(settled, settled.filter(isUnseen).map((item) => item.id), nowDate.toISOString());
+    });
+    setNotificationsOpen(false);
+  }
+  function snoozeFromCentre(id: string, choice: SnoozeChoice) {
+    const until = choice === "hour"
+      ? new Date(Date.now() + 3_600_000)
+      : zonedDateTimeToInstant(addDays(today, 1), settings.reminderTime, settings.timezone);
+    setReminderBase(snoozeReminder(reminders, id, until.toISOString()));
+    notify(choice === "hour" ? "Snoozed for one hour." : "Snoozed until tomorrow.");
+  }
+  function dismissFromCentre(id: string) {
+    setReminderBase(dismissReminder(reminders, id, new Date().toISOString()));
+  }
+  function openFromCentre(commitmentId: string) {
+    const target = commitments.find((item) => item.id === commitmentId);
+    closeNotifications();
+    if (target) openEdit(target);
+  }
   function updateSettings(patch: Partial<Settings>) { setSettings((current) => ({ ...current, ...patch })); }
   function openCreate() { setEditing(null); setProposal(null); setModalOpen(true); }
   function openEdit(item: Commitment) {
@@ -280,14 +331,19 @@ export default function HauntApp() {
     void repository?.deleteAll(LOCAL_USER).then(() => {
       setCommitments([]);
       setOccurrences([]);
+      setReminderBase([]);
       setSettings(settingsSchema.parse({ timezone: browserTimeZone() }));
       notify("All local data has been deleted.");
     });
   }
   function handleQuickCapture() {
     if (!quickText.trim()) return;
-    const parsed = parseCapture(quickText);
-    setProposal({ draft: draftFromProposal(parsed, settings.timezone), confidence: parsed.confidence });
+    const parsed = parseCapture(quickText, { now: new Date(), timezone: settings.timezone });
+    setProposal({
+      ...proposalToReview(parsed, { currency: settings.currency, reminderOffsetsDays: settings.defaultReminderOffsets }),
+      parser: parsed.parser,
+      sourceSummary: parsed.sourceSummary,
+    });
     setEditing(null);
     setModalOpen(true);
   }
@@ -341,11 +397,13 @@ export default function HauntApp() {
           <div className="breadcrumb"><span>THE HAUNT</span><ChevronRight size={13}/><strong>{currentNav.label.toUpperCase()}</strong></div>
           <div className="topbar-actions">
             <button className="topbar-search" onClick={() => setSearchOpen((open) => !open)}><Search size={15}/><span>Search the house</span><kbd>⌘ K</kbd></button>
+            <button className="icon-button bell-button" onClick={() => (notificationsOpen ? closeNotifications() : openNotifications())} aria-label={`Reminders: ${unseenReminders} new, ${visibleReminders.length} in total`} aria-expanded={notificationsOpen} title="Reminders"><Bell size={17}/>{(unseenReminders > 0 || visibleReminders.length > 0) && <em className={classNames("bell-count", unseenReminders > 0 && "bell-count-new")}>{unseenReminders > 0 ? unseenReminders : visibleReminders.length}</em>}</button>
             <button className="icon-button sound-button" onClick={() => updateSettings({ effects: !settings.effects })} aria-label={settings.effects ? "Mute sound effects" : "Enable sound effects"} title="Sound effects"><span className={classNames("sound-indicator", settings.effects && "sound-indicator-on")}/>{settings.effects ? <Volume2 size={17}/> : <VolumeX size={17}/>}</button>
             <div className="topbar-avatar">K</div>
           </div>
         </header>
 
+        {notificationsOpen && <NotificationCentre reminders={visibleReminders} commitments={commitments} today={today} locale={settings.locale} reminderTime={settings.reminderTime} showTest={showTestReminder} onClose={closeNotifications} onSnooze={snoozeFromCentre} onDismiss={dismissFromCentre} onOpen={openFromCentre} onSendTest={() => setShowTestReminder(true)} onDismissTest={() => setShowTestReminder(false)}/>}
         {searchOpen && <div className="search-popover"><Search size={16}/><input autoFocus value={searchText} onChange={(event) => { setSearchText(event.target.value); if (view === "today") setView("archive"); }} placeholder="Search commitments, notes, categories..."/><button className="icon-button tiny" onClick={() => { setSearchOpen(false); setSearchText(""); }}><X size={15}/></button></div>}
 
         <div className="page-content">
@@ -413,7 +471,7 @@ export default function HauntApp() {
       </section>
       <button className="floating-add" onClick={openCreate} aria-label="Add commitment"><Plus size={21}/></button>
 
-      {modalOpen && <CommitmentModal initial={editing} proposal={proposal} defaults={{ dueDate: addDays(today, 1), currency: settings.currency }} onClose={() => { setModalOpen(false); setEditing(null); setProposal(null); }} onSave={saveCommitment}/>}
+      {modalOpen && <CommitmentModal initial={editing} proposal={proposal} defaults={{ dueDate: addDays(today, 1), currency: settings.currency, reminders: settings.defaultReminderOffsets }} onClose={() => { setModalOpen(false); setEditing(null); setProposal(null); }} onSave={saveCommitment}/>}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-icon"><Check size={14}/></span>{toast}</div>}
       {!hydrated && <div className="boot-screen"><div className="boot-mark"><Ghost size={28}/></div><span>THE HAUNT</span><i>THE HOUSE IS WAKING</i></div>}
     </main>
@@ -443,8 +501,8 @@ function EmptyState({ title, text, onAction }: { title: string; text: string; on
 
 function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
   initial: Commitment | null;
-  proposal: { draft: CommitmentDraft; confidence: "high" | "medium" | "low" } | null;
-  defaults: { dueDate: string; currency: string };
+  proposal: ProposalState | null;
+  defaults: { dueDate: string; currency: string; reminders?: number[] };
   onClose: () => void;
   onSave: (draft: CommitmentDraft) => string[];
 }) {
@@ -454,7 +512,16 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
   const isProposal = Boolean(proposal && !initial);
   const { title, description, dueDate, amount, currency, reminderOffsetsDays: reminders } = draft;
   const canSave = title.trim().length > 0 && Boolean(dueDate);
-  const set = (patch: Partial<CommitmentDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
+  const notes = proposal?.notes ?? {};
+  // Editing a field the reader was unsure about clears its CHECK THIS marker.
+  const FIELD_FOR: Record<string, string> = { title: "title", type: "type", dueDate: "dueDate", amount: "amountMinor", currency: "currency", repeat: "recurrence" };
+  const set = (patch: Partial<CommitmentDraft>) => {
+    setDraft((current) => ({ ...current, ...patch, ...("dueDate" in patch ? { dayOfMonth: undefined } : {}) }));
+    setTouched((current) => new Set([...current, ...Object.keys(patch).map((key) => FIELD_FOR[key]).filter(Boolean)]));
+  };
+  const checkTag = (field: string) => (notes[field] && !touched.has(field) ? <span className="check-tag">CHECK THIS</span> : null);
+  const pendingNotes = Object.entries(notes).filter(([field]) => !touched.has(field));
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) { if (event.key === "Escape") onClose(); }
@@ -472,12 +539,12 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
     <div className="modal-topline"><span><span className="modal-seal"><WandSparkles size={14}/></span>{isProposal ? "THE SÉANCE ROOM / REVIEW" : initial ? "THE ARCHIVE / EDIT" : "THE ARCHIVE / NEW RECORD"}</span><button className="icon-button" onClick={onClose} aria-label="Close modal"><X size={18}/></button></div>
     <h2 id="modal-title">{isProposal ? <>Review the <em>omen</em>.</> : initial ? <>Rewrite the <em>record</em>.</> : <>What must be <em>remembered</em>?</>}</h2>
     <p className="modal-intro">{isProposal ? "We've interpreted your note. Check every detail before it enters the ledger." : "Give this loose end a name, a date and a place in the ledger."}</p>
-    {isProposal && <div className={classNames("extraction-notice", `confidence-${proposal?.confidence}`)}><Sparkles size={15}/><div><strong>{proposal?.confidence === "high" ? "A clear signal was found" : proposal?.confidence === "medium" ? "Some details were found" : "The signal is unclear"}</strong><span>This is a local prototype parser, not a connected AI service. Verify the details below.</span></div></div>}
+    {isProposal && proposal && <div className="extraction-notice" role="note"><Sparkles size={15}/><div><strong>{proposal.parser === "deterministic" ? "Read by the built-in rule-based reader (not AI)" : "Read by an AI model"}</strong><span>These are suggestions from your note, not facts. Check every detail before it enters the ledger. Nothing is saved until you confirm.</span>{proposal.sourceSummary && <span className="extraction-source">From your note: “{proposal.sourceSummary}”</span>}{pendingNotes.length > 0 && <ul className="check-list">{pendingNotes.map(([field, note]) => <li key={field}><b>{CHECK_LABELS[field] ?? "Note"}:</b> {note}</li>)}</ul>}</div></div>}
     <form onSubmit={submit}>
-      <label className="field-label">COMMITMENT NAME<input className="field-control" value={title} onChange={(event) => set({ title: event.target.value })} placeholder="e.g. Pay school fees" autoFocus required maxLength={120}/></label>
+      <label className="field-label">COMMITMENT NAME {checkTag("title")}<input className="field-control" value={title} onChange={(event) => set({ title: event.target.value })} placeholder="e.g. Pay school fees" autoFocus required maxLength={120}/></label>
       <label className="field-label">DETAILS <span className="optional-label">OPTIONAL</span><textarea className="field-control field-textarea" value={description} onChange={(event) => set({ description: event.target.value })} placeholder="Add a note to your future self..." rows={2}/></label>
-      <div className="field-row"><label className="field-label">CATEGORY<select className="field-control" value={draft.type} onChange={(event) => set({ type: event.target.value as CommitmentType })}>{COMMITMENT_TYPES.map((key) => <option value={key} key={key}>{categoryLabels[key]}</option>)}</select></label><label className="field-label">DUE DATE<input className="field-control" type="date" value={dueDate} onChange={(event) => set({ dueDate: event.target.value })} required/></label></div>
-      <div className="field-row"><label className="field-label">REPEAT<select className="field-control" value={draft.repeat} onChange={(event) => set({ repeat: event.target.value as RepeatChoice })}><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="fortnightly">Every two weeks</option><option value="monthly">Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label><label className="field-label">AMOUNT <span className="optional-label">OPTIONAL</span><div className="amount-control"><select className="field-control currency-select" value={currency} onChange={(event) => set({ currency: event.target.value })}>{[...new Set(["ZAR", "USD", "GBP", "EUR", currency])].map((code) => <option key={code}>{code}</option>)}</select><input className="field-control" type="number" min="0" step="0.01" value={amount} onChange={(event) => set({ amount: event.target.value })} placeholder="0.00"/></div></label></div>
+      <div className="field-row"><label className="field-label">CATEGORY {checkTag("type")}<select className="field-control" value={draft.type} onChange={(event) => set({ type: event.target.value as CommitmentType })}>{COMMITMENT_TYPES.map((key) => <option value={key} key={key}>{categoryLabels[key]}</option>)}</select></label><label className="field-label">DUE DATE {checkTag("dueDate")}<input className="field-control" type="date" value={dueDate} onChange={(event) => set({ dueDate: event.target.value })} required/></label></div>
+      <div className="field-row"><label className="field-label">REPEAT {checkTag("recurrence")}<select className="field-control" value={draft.repeat} onChange={(event) => set({ repeat: event.target.value as RepeatChoice })}><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="fortnightly">Every two weeks</option><option value="monthly">Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label><label className="field-label">AMOUNT <span className="optional-label">OPTIONAL</span> {checkTag("amountMinor")}{checkTag("currency")}<div className="amount-control"><select className="field-control currency-select" value={currency} onChange={(event) => set({ currency: event.target.value })}>{[...new Set(["ZAR", "USD", "GBP", "EUR", currency])].map((code) => <option key={code}>{code}</option>)}</select><input className="field-control" type="number" min="0" step="0.01" value={amount} onChange={(event) => set({ amount: event.target.value })} placeholder="0.00"/></div></label></div>
       <div className="reminder-config"><div className="reminder-head"><span>REMIND ME BEFORE</span><button type="button" onClick={() => setShowAdvanced((show) => !show)}>{showAdvanced ? "Hide" : "Customise"} <ChevronDown size={13}/></button></div>{showAdvanced && <div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} className={classNames("reminder-chip", reminders.includes(value) && "reminder-chip-active")} onClick={() => toggleReminder(value)}>{value === 0 ? "On the day" : `${value} day${value === 1 ? "" : "s"} before`}</button>)}</div>}</div>
       {errors.length > 0 && <p className="form-error" role="alert">{errors.join(". ")}.</p>}<div className="modal-actions"><button type="button" className="button-quiet" onClick={onClose}>Cancel</button><button type="submit" className="button-primary" disabled={!canSave}>{isProposal ? <><Check size={15}/> Confirm & add to ledger</> : <><Plus size={15}/> {initial ? "Save changes" : "Add to the ledger"}</>}</button></div>
     </form>
@@ -496,8 +563,12 @@ function SettingsView({ settings, updateSettings, exportData, total, loadDemoDat
       <SettingToggle title="Reduced motion" description="Reduce environmental movement and animated transitions." checked={settings.reduceMotion} onChange={(value) => updateSettings({ reduceMotion: value })}/>
       <div className="setting-range"><div><strong>Display currency</strong><span>Used for commitment amount summaries.</span></div><select className="field-control settings-select" value={settings.currency} onChange={(event) => updateSettings({ currency: event.target.value })}><option>ZAR</option><option>USD</option><option>GBP</option><option>EUR</option></select></div>
     </section>
+    <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><Bell size={17}/></span><div><h3>Reminders</h3><p>In-app only. They appear while THE HAUNT is open.</p></div></div>
+      <div className="setting-range"><div><strong>Reminder time</strong><span>Time of day a reminder becomes due.</span></div><input className="field-control settings-select" type="time" aria-label="Reminder time" value={settings.reminderTime} onChange={(event) => { if (event.target.value) updateSettings({ reminderTime: event.target.value }); }}/></div>
+      <div className="setting-range"><div><strong>Default reminders</strong><span>Used for new commitments.</span></div><div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} aria-pressed={settings.defaultReminderOffsets.includes(value)} className={classNames("reminder-chip", settings.defaultReminderOffsets.includes(value) && "reminder-chip-active")} onClick={() => updateSettings({ defaultReminderOffsets: settings.defaultReminderOffsets.includes(value) ? settings.defaultReminderOffsets.filter((entry) => entry !== value) : [...settings.defaultReminderOffsets, value].sort((a, b) => b - a) })}>{value === 0 ? "On the day" : `${value}d`}</button>)}</div></div>
+    </section>
     <section className="settings-card settings-data-card"><div className="settings-card-heading"><span className="settings-icon"><Shield size={17}/></span><div><h3>Your personal ledger</h3><p>This prototype stores commitments in this browser only.</p></div></div><div className="data-summary"><div><span>STORED RECORDS</span><strong>{total.toString().padStart(2, "0")}</strong></div><div><span>STORAGE MODE</span><strong>LOCAL</strong></div></div><div className="settings-actions"><button className="button-secondary" onClick={exportData}><Download size={14}/> Export my data</button><button className="button-secondary" onClick={loadDemoData}><Sparkles size={14}/> Load fictional demo data</button><button className="button-secondary button-danger" onClick={deleteAllData}><Trash2 size={14}/> Delete all my data</button><span><LockKeyhole size={12}/> No account or cloud sync is connected yet.</span></div></section>
-    <div className="prototype-note"><AlertTriangle size={15}/><p><strong>Prototype notice.</strong> Reminders, AI document extraction, voice capture and cloud synchronisation are not connected in this first build. The current version demonstrates the working local commitment ledger and horror interface.</p></div>
+    <div className="prototype-note"><AlertTriangle size={15}/><p><strong>Prototype notice.</strong> Reminders appear inside the app only: there is no email, push, text-message or background delivery. AI document extraction, voice capture and cloud synchronisation are not connected in this first build. The current version demonstrates the working local commitment ledger and horror interface.</p></div>
   </div>;
 }
 
