@@ -1,0 +1,15 @@
+# Kiro usage log
+
+Only work that was actually done with Kiro is listed. Configuration files existing in `.kiro/` is not usage. Add an entry after each session with evidence.
+
+| Date | Kiro capability | What happened | Evidence |
+|---|---|---|---|
+| 2026-11-13 | Kiro IDE agent session (Vibe) | Prompt 0: repository audit. Read the brief, docs and source; ran typecheck, tests, build and lint; wrote the audit. | `docs/IMPLEMENTATION-AUDIT.md` |
+| 2026-11-13 | Kiro IDE agent session, introspect sub-agent | Prompt 1: checked current Kiro formats for agents, hooks, steering and specs against kiro.dev docs. | Session transcript; this log |
+| 2026-11-13 | Steering | Set inclusion modes: product, security, tech, structure always; visual-design and testing by file match; competition auto. | `.kiro/steering/*.md` |
+| 2026-11-13 | Custom agents | Rewrote domain-engineer, experience-engineer, quality-guardian with explicit resources and permissions. Agents have not been run yet. | `.kiro/agents/*.md` |
+| 2026-11-13 | Hooks | Added `post-task-verify` (PostTaskExec: typecheck and tests). Existing typecheck-on-save kept. Neither has fired yet. | `.kiro/hooks/*.json` |
+| 2026-11-13 | Specs | Created product-foundation, commitment-domain, recurrence-engine, reminders-and-notifications, cinematic-experience, pwa-and-mobile, privacy-and-security, release-and-demo; rewrote intelligent-capture. No spec task has been executed yet. | `.kiro/specs/*` |
+
+## Not yet used
+MCP servers, Powers, Kiro Crew, spec task execution, hook runs, custom agent runs. Do not claim these until they happen.

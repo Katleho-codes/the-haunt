@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "verify-after-spec-task",
+      "trigger": "PostTaskExec",
+      "description": "Run typecheck and tests after a spec task completes so a task is never marked done on broken code.",
+      "action": {
+        "type": "command",
+        "command": "npm run typecheck && npm test",
+        "timeout": 180
+      }
+    }
+  ]
+}

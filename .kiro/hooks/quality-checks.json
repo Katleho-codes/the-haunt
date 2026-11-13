@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "typecheck-after-typescript-save",
+      "description": "Run the TypeScript compiler after a TypeScript or TSX file is saved.",
+      "trigger": "PostFileSave",
+      "matcher": "\\.(ts|tsx)$",
+      "action": {
+        "type": "command",
+        "command": "npm run typecheck"
+      }
+    }
+  ]
+}

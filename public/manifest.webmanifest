@@ -1,0 +1,17 @@
+{
+  "name": "THE HAUNT",
+  "short_name": "THE HAUNT",
+  "description": "Keep life's loose ends from coming back to haunt you.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080b0b",
+  "theme_color": "#080b0b",
+  "icons": [
+    {
+      "src": "/haunt-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
