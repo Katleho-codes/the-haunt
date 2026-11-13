@@ -27,11 +27,11 @@ export interface CommitmentDraft {
 export function ruleFromChoice(choice: RepeatChoice, dueDate: DateOnly): RecurrenceRule | undefined {
   const { day } = parseDateOnly(dueDate);
   switch (choice) {
-    case "weekly": return { frequency: "weekly", interval: 1 };
-    case "fortnightly": return { frequency: "weekly", interval: 2 };
-    case "monthly": return { frequency: "monthly", interval: 1, dayOfMonth: day };
-    case "quarterly": return { frequency: "quarterly", interval: 1, dayOfMonth: day };
-    case "yearly": return { frequency: "yearly", interval: 1 };
+    case "weekly": return { frequency: "weekly", interval: 1, startDate: dueDate };
+    case "fortnightly": return { frequency: "weekly", interval: 2, startDate: dueDate };
+    case "monthly": return { frequency: "monthly", interval: 1, dayOfMonth: day, startDate: dueDate };
+    case "quarterly": return { frequency: "quarterly", interval: 1, dayOfMonth: day, startDate: dueDate };
+    case "yearly": return { frequency: "yearly", interval: 1, startDate: dueDate };
     default: return undefined;
   }
 }
@@ -99,7 +99,8 @@ export function draftToCommitment(draft: CommitmentDraft, context: DraftContext)
   if (errors.length > 0 || !draft.dueDate) return { ok: false, errors };
 
   const { existing } = context;
-  const keepExistingRule = existing && choiceFromRule(existing.recurrence) === draft.repeat;
+  // Keep the stored rule (and its anchor) unless the pattern or the due date changed; then re-anchor at the new date.
+  const keepExistingRule = existing && choiceFromRule(existing.recurrence) === draft.repeat && existing.dueDate === draft.dueDate;
   const candidate = {
     ...existing,
     id: existing?.id ?? context.newId(),

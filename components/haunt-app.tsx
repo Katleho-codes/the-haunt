@@ -20,7 +20,8 @@ import {
 } from "@/lib/domain/draft";
 import { formatMoney, sumByCurrency } from "@/lib/domain/money";
 import { dueLabel, recurrenceLabel, TYPE_LABELS } from "@/lib/domain/present";
-import { COMMITMENT_TYPES, settingsSchema, type Commitment, type CommitmentType, type Settings } from "@/lib/domain/schema";
+import { COMMITMENT_TYPES, settingsSchema, type Commitment, type CommitmentType, type Occurrence, type Settings } from "@/lib/domain/schema";
+import { completeOccurrence, nextDates, undoLatestCompletion } from "@/lib/recurrence/series";
 import { addDays } from "@/lib/domain/dates";
 import { LocalStorageRepository } from "@/lib/storage/local-storage-repository";
 import type { LoadStatus } from "@/lib/storage/repository";
@@ -104,6 +105,7 @@ function useHauntSound(storedSettings: Settings) {
 
 export default function HauntApp() {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
+  const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [view, setView] = useState<ViewId>("today");
   const [hydrated, setHydrated] = useState(false);
@@ -129,10 +131,11 @@ export default function HauntApp() {
     let cancelled = false;
     (async () => {
       const status = await repository.init(LOCAL_USER);
-      const [items, stored] = await Promise.all([repository.list(LOCAL_USER), repository.getSettings(LOCAL_USER)]);
+      const [items, history, stored] = await Promise.all([repository.list(LOCAL_USER), repository.listOccurrences(LOCAL_USER), repository.getSettings(LOCAL_USER)]);
       if (cancelled) return;
       setLoadStatus(status);
       setCommitments(items);
+      setOccurrences(history);
       setSettings(stored);
       setHydrated(true);
     })();
@@ -143,6 +146,10 @@ export default function HauntApp() {
     if (!hydrated || !repository) return;
     void repository.replaceAll(LOCAL_USER, commitments);
   }, [commitments, hydrated, repository]);
+  useEffect(() => {
+    if (!hydrated || !repository) return;
+    void repository.replaceOccurrences(LOCAL_USER, occurrences);
+  }, [occurrences, hydrated, repository]);
   useEffect(() => {
     if (!hydrated || !repository) return;
     void repository.saveSettings(LOCAL_USER, settings);
@@ -164,7 +171,15 @@ export default function HauntApp() {
   const overdue = groups.overdue;
   const dueToday = groups.dueToday;
   const upcoming = groups.upcoming;
-  const completed = useMemo(() => commitments.filter((item) => item.status === "completed").sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")), [commitments]);
+  // The Crypt shows finished one-off commitments plus each completed occurrence of recurring ones.
+  const completed = useMemo(() => {
+    const occurrenceRows: Commitment[] = occurrences.flatMap((entry) => {
+      const master = commitments.find((item) => item.id === entry.commitmentId);
+      return master ? [{ ...master, id: entry.id, status: "completed" as const, dueDate: entry.dueDate, completedAt: entry.completedAt }] : [];
+    });
+    const oneOffs = commitments.filter((item) => item.status === "completed");
+    return [...oneOffs, ...occurrenceRows].sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+  }, [commitments, occurrences]);
   const recurring = useMemo(() => filterCommitments(active, { recurring: true }).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [active]);
   const upcomingTotals = useMemo(() => sumByCurrency([...dueToday, ...upcoming]), [dueToday, upcoming]);
   const restlessCount = overdue.length;
@@ -178,7 +193,12 @@ export default function HauntApp() {
   function notify(message: string) { setToast(message); }
   function updateSettings(patch: Partial<Settings>) { setSettings((current) => ({ ...current, ...patch })); }
   function openCreate() { setEditing(null); setProposal(null); setModalOpen(true); }
-  function openEdit(item: Commitment) { setEditing(item); setProposal(null); setModalOpen(true); }
+  function openEdit(item: Commitment) {
+    // A completed occurrence row edits its series.
+    const master = commitments.find((entry) => entry.id === item.id) ?? commitments.find((entry) => occurrences.some((o) => o.id === item.id && o.commitmentId === entry.id));
+    if (!master) return;
+    setEditing(master); setProposal(null); setModalOpen(true);
+  }
   function navigate(next: ViewId) { setView(next); setSearchText(""); setMobileNavOpen(false); }
 
   function saveCommitment(draft: CommitmentDraft): string[] {
@@ -205,11 +225,31 @@ export default function HauntApp() {
   }
 
   function completeCommitment(item: Commitment) {
-    setCommitments((items) => items.map((entry) => entry.id === item.id ? completeItem(entry, new Date().toISOString()) : entry));
+    const nowIso = new Date().toISOString();
+    if (item.recurrence) {
+      const result = completeOccurrence(item, occurrences, nowIso);
+      if (!result.ok) { notify(result.reason); return; }
+      setCommitments((items) => items.map((entry) => entry.id === item.id ? result.commitment : entry));
+      setOccurrences(result.occurrences);
+      chime("complete");
+      notify(result.next ? `Laid to rest. Next: ${formatDateOnly(result.next, settings.locale, { day: "numeric", month: "long" })}.` : "Laid to rest. The series has ended.");
+      return;
+    }
+    setCommitments((items) => items.map((entry) => entry.id === item.id ? completeItem(entry, nowIso) : entry));
     chime("complete");
     notify("Laid to rest. Well done.");
   }
   function restoreCommitment(item: Commitment) {
+    const entry = occurrences.find((o) => o.id === item.id);
+    if (entry) {
+      const master = commitments.find((c) => c.id === entry.commitmentId);
+      const result = master ? undoLatestCompletion(master, occurrences, entry.id, new Date().toISOString()) : undefined;
+      if (!result || !result.ok) { notify(result && !result.ok ? result.reason : "That series no longer exists."); return; }
+      setCommitments((items) => items.map((c) => c.id === result.commitment.id ? result.commitment : c));
+      setOccurrences(result.occurrences);
+      notify("The occurrence has returned to the living.");
+      return;
+    }
     setCommitments((items) => items.map((entry) => entry.id === item.id ? restoreItem(entry, new Date().toISOString()) : entry));
     notify("The commitment has returned to the living.");
   }
@@ -218,8 +258,16 @@ export default function HauntApp() {
     notify("Archived. The history is kept.");
   }
   function deleteCommitment(item: Commitment) {
-    if (!window.confirm(`Permanently remove “${item.title}”?`)) return;
+    const historyEntry = occurrences.find((o) => o.id === item.id);
+    if (historyEntry) {
+      if (!window.confirm(`Remove this completed record of “${item.title}” from history? The series keeps going.`)) return;
+      setOccurrences((list) => list.filter((o) => o.id !== historyEntry.id));
+      notify("The record has been destroyed.");
+      return;
+    }
+    if (!window.confirm(`Permanently remove “${item.title}”${item.recurrence ? " and its completion history" : ""}?`)) return;
     setCommitments((items) => items.filter((entry) => entry.id !== item.id));
+    setOccurrences((list) => list.filter((o) => o.commitmentId !== item.id));
     notify("The record has been destroyed.");
   }
   function loadDemoData() {
@@ -231,6 +279,7 @@ export default function HauntApp() {
     if (!window.confirm("Delete every commitment and setting stored in this browser? This cannot be undone.")) return;
     void repository?.deleteAll(LOCAL_USER).then(() => {
       setCommitments([]);
+      setOccurrences([]);
       setSettings(settingsSchema.parse({ timezone: browserTimeZone() }));
       notify("All local data has been deleted.");
     });
@@ -356,7 +405,7 @@ export default function HauntApp() {
             <section className="inner-page-heading"><div className="eyebrow"><span className="eyebrow-line"/> THE HOUSE / {currentNav.label.toUpperCase()}</div><div className="inner-heading-row"><div><h1>{view === "archive" ? <>The <em>Archive</em></> : view === "clocktower" ? <>The <em>Clocktower</em></> : view === "crypt" ? <>The <em>Crypt</em></> : <>The Keeper&apos;s <em>Room</em></>}</h1><p>{view === "archive" ? "Every loose end, every promise, every date worth remembering." : view === "clocktower" ? "The cycles that turn, again and again." : view === "crypt" ? "The commitments you've successfully laid to rest." : "Make the house feel the way you want it to."}</p></div>{view !== "keeper" && <button className="hero-cta compact-cta" onClick={openCreate}><Plus size={15}/> New commitment</button>}</div></section>
             {view === "keeper" ? <SettingsView settings={settings} updateSettings={updateSettings} exportData={exportData} total={commitments.length} loadDemoData={loadDemoData} deleteAllData={deleteAllData} /> : <>
               <div className="list-toolbar"><div className="filter-count">{filtered.length} {view === "crypt" ? "resting records" : "records in this room"}</div><div className="toolbar-search"><Search size={14}/><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search the ledger..."/><SlidersHorizontal size={14}/></div></div>
-              <div className="commitment-list large-list">{filtered.length === 0 ? <EmptyState title={view === "crypt" ? "The crypt is empty." : "Nothing stirs here."} text={view === "crypt" ? "Completed commitments will find their resting place here." : "No commitments match this room yet."} onAction={openCreate}/> : filtered.map((item) => <CommitmentRow key={item.id} item={item} onComplete={completeCommitment} onEdit={openEdit} onDelete={deleteCommitment} onRestore={restoreCommitment} onArchive={archiveItem} today={today} locale={settings.locale} completed={view === "crypt"}/>)}</div>
+              <div className="commitment-list large-list">{filtered.length === 0 ? <EmptyState title={view === "crypt" ? "The crypt is empty." : "Nothing stirs here."} text={view === "crypt" ? "Completed commitments will find their resting place here." : "No commitments match this room yet."} onAction={openCreate}/> : filtered.map((item) => <CommitmentRow key={item.id} item={item} onComplete={completeCommitment} onEdit={openEdit} onDelete={deleteCommitment} onRestore={restoreCommitment} onArchive={archiveItem} today={today} locale={settings.locale} completed={view === "crypt"} nextDates={view === "clocktower" ? nextDates(item, 3) : undefined}/>)}</div>
             </>}
           </>}
           <footer className="page-footer"><span>THE HAUNT © 2026</span><span>KEEP LIFE&apos;S LOOSE ENDS FROM COMING BACK TO HAUNT YOU.</span><span>BUILT FOR THE LIVING <Ghost size={12}/></span></footer>
@@ -375,13 +424,13 @@ function StatCard({ label, value, note, icon, warning, compact }: { label: strin
   return <div className="stat-card"><div className="stat-card-top"><span>{label}</span><span className={classNames("stat-icon", warning && "stat-icon-warning")}>{icon}</span></div><div className={classNames("stat-value", compact && "stat-value-money", warning && "stat-value-warning")}>{value}</div><div className="stat-note">{note}</div></div>;
 }
 
-function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchive, today, locale, overdue, completed }: { item: Commitment; onComplete: (item: Commitment) => void; onEdit: (item: Commitment) => void; onDelete: (item: Commitment) => void; onRestore: (item: Commitment) => void; onArchive: (item: Commitment) => void; today: string; locale: string; overdue?: boolean; completed?: boolean }) {
+function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchive, today, locale, overdue, completed, nextDates: upcomingDates }: { item: Commitment; onComplete: (item: Commitment) => void; onEdit: (item: Commitment) => void; onDelete: (item: Commitment) => void; onRestore: (item: Commitment) => void; onArchive: (item: Commitment) => void; today: string; locale: string; overdue?: boolean; completed?: boolean; nextDates?: string[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const categoryIcon = item.type === "bill" ? <CircleDollarSign size={16}/> : item.type === "subscription" ? <RotateCcw size={16}/> : item.type === "appointment" ? <CalendarDays size={16}/> : item.type === "renewal" ? <Shield size={16}/> : item.type === "household" ? <House size={16}/> : <FileText size={16}/>;
   return <article className={classNames("commitment-row", overdue && "commitment-row-overdue", completed && "commitment-row-completed", menuOpen && "commitment-row-menu-open")}>
     <button className={classNames("complete-control", completed && "complete-control-done")} onClick={() => completed ? undefined : onComplete(item)} disabled={completed} aria-label={completed ? "Completed" : "Mark complete"}>{completed ? <Check size={14}/> : <span/>}</button>
     <div className="commitment-type-icon">{categoryIcon}</div>
-    <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i>·</i><span>{item.description || "No additional details"}</span></div></div>
+    <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i>·</i><span>{item.description || "No additional details"}</span></div>{upcomingDates && upcomingDates.length > 0 && <div className="commitment-next">Next: {upcomingDates.map((date) => formatDateOnly(date, locale, { day: "numeric", month: "short" })).join(" · ")}</div>}</div>
     <div className="commitment-due"><strong className={classNames(overdue && "danger-text")}>{dueLabel(item.dueDate, today, locale)}</strong><span>{formatDateOnly(item.dueDate, locale, { day: "2-digit", month: "short", year: "numeric" })}</span></div>
     <div className="commitment-amount">{formatMoney(item.amountMinor, item.currency, locale)}</div>
     <div className="row-menu-wrap"><button className="icon-button tiny row-more" aria-label="More actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close actions" onClick={() => setMenuOpen(false)}/><div className="row-menu">{!completed && <button onClick={() => { onComplete(item); setMenuOpen(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button onClick={() => { onEdit(item); setMenuOpen(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && <button onClick={() => { onArchive(item); setMenuOpen(false); }}><Archive size={14}/> Archive</button>}{completed && <button onClick={() => { onRestore(item); setMenuOpen(false); }}><RotateCcw size={14}/> Restore</button>}<button className="danger-menu" onClick={() => { onDelete(item); setMenuOpen(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>

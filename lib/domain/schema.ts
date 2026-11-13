@@ -23,13 +23,29 @@ function isKnownCurrency(code: string): boolean {
 }
 export const currencySchema = z.string().refine(isKnownCurrency, "Must be an ISO 4217 currency code");
 
-export const recurrenceRuleSchema = z.object({
-  frequency: z.enum(RECURRENCE_FREQUENCIES),
-  interval: z.number().int().min(1).max(99),
-  weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
-  dayOfMonth: z.number().int().min(1).max(31).optional(),
-  endDate: dateOnlySchema.optional(),
-});
+export const recurrenceRuleSchema = z
+  .object({
+    frequency: z.enum(RECURRENCE_FREQUENCIES),
+    interval: z.number().int().min(1).max(99),
+    /** Weekly rules only: days of week, 0 = Sunday. */
+    weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+    /** Monthly and quarterly rules: the day the user means, kept even when a short month clamps it. */
+    dayOfMonth: z.number().int().min(1).max(31).optional(),
+    /** Anchor of the series. Occurrences are computed from this, never from the previous occurrence. */
+    startDate: dateOnlySchema.optional(),
+    endDate: dateOnlySchema.optional(),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.weekdays && rule.frequency !== "weekly") {
+      ctx.addIssue({ code: "custom", path: ["weekdays"], message: "Weekdays only apply to weekly rules" });
+    }
+    if (rule.dayOfMonth && rule.frequency !== "monthly" && rule.frequency !== "quarterly") {
+      ctx.addIssue({ code: "custom", path: ["dayOfMonth"], message: "Day of month only applies to monthly or quarterly rules" });
+    }
+    if (rule.startDate && rule.endDate && rule.endDate < rule.startDate) {
+      ctx.addIssue({ code: "custom", path: ["endDate"], message: "End date must not be before the start date" });
+    }
+  });
 export type RecurrenceRule = z.infer<typeof recurrenceRuleSchema>;
 
 const MAX_TITLE = 160;
@@ -68,6 +84,16 @@ export const commitmentSchema = z
     }
   });
 
+/** A completed occurrence of a recurring commitment. Upcoming occurrences are derived, not stored. */
+export const occurrenceSchema = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+  commitmentId: z.string().min(1),
+  dueDate: dateOnlySchema,
+  completedAt: z.string().datetime(),
+});
+export type Occurrence = z.infer<typeof occurrenceSchema>;
+
 export type Commitment = z.infer<typeof commitmentSchema>;
 export type CommitmentType = (typeof COMMITMENT_TYPES)[number];
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
@@ -87,6 +113,7 @@ export const storedDataSchema = z.object({
   version: z.literal(1),
   userId: z.string().min(1),
   commitments: z.array(commitmentSchema),
+  occurrences: z.array(occurrenceSchema).default([]),
   settings: settingsSchema,
 });
 export type StoredData = z.infer<typeof storedDataSchema>;

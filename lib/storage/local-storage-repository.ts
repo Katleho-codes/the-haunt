@@ -1,8 +1,10 @@
 import {
   commitmentSchema,
+  occurrenceSchema,
   settingsSchema,
   storedDataSchema,
   type Commitment,
+  type Occurrence,
   type Settings,
   type StoredData,
 } from "@/lib/domain/schema";
@@ -75,6 +77,7 @@ export class LocalStorageRepository implements CommitmentRepository {
       version: 1,
       userId,
       commitments: migrated.commitments,
+      occurrences: [],
       settings: migrateLegacySettings(legacySettings, this.timezone),
     });
     // Legacy keys are left in place as a backup until the user confirms.
@@ -103,7 +106,8 @@ export class LocalStorageRepository implements CommitmentRepository {
     const data = this.read(userId);
     const next = data.commitments.filter((item) => item.id !== id);
     if (next.length === data.commitments.length) return false;
-    this.write(userId, { ...data, commitments: next });
+    // Deleting a commitment also deletes its completion history.
+    this.write(userId, { ...data, commitments: next, occurrences: data.occurrences.filter((entry) => entry.commitmentId !== id) });
     return true;
   }
 
@@ -113,6 +117,18 @@ export class LocalStorageRepository implements CommitmentRepository {
       return commitmentSchema.parse(item);
     });
     this.write(userId, { ...this.read(userId), commitments: valid });
+  }
+
+  async listOccurrences(userId: string): Promise<Occurrence[]> {
+    return this.read(userId).occurrences.filter((entry) => entry.userId === userId);
+  }
+
+  async replaceOccurrences(userId: string, occurrences: Occurrence[]): Promise<void> {
+    const valid = occurrences.map((entry) => {
+      if (entry.userId !== userId) throw new Error("Occurrence belongs to a different user");
+      return occurrenceSchema.parse(entry);
+    });
+    this.write(userId, { ...this.read(userId), occurrences: valid });
   }
 
   async getSettings(userId: string): Promise<Settings> {
@@ -141,7 +157,7 @@ export class LocalStorageRepository implements CommitmentRepository {
   private read(userId: string): StoredData {
     const raw = this.storage.getItem(storeKey(userId));
     const parsed = raw === null ? undefined : this.parse(raw);
-    return parsed ?? { version: 1, userId, commitments: [], settings: settingsSchema.parse({ timezone: this.timezone }) };
+    return parsed ?? { version: 1, userId, commitments: [], occurrences: [], settings: settingsSchema.parse({ timezone: this.timezone }) };
   }
 
   private write(userId: string, data: StoredData): void {

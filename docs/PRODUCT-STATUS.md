@@ -49,3 +49,12 @@ Implemented in the UI but NOT verified in a browser (no browser automation has r
 - The old seed data is no longer loaded automatically.
 
 Still not implemented: recurrence occurrences (completing a recurring item does not create the next one), reminders, validated import, search filters beyond text, backend, PWA service worker, LLM extraction, known parser defects in `docs/IMPLEMENTATION-AUDIT.md` section 5.
+## Update 13 November 2026 (Prompt 3: recurrence)
+
+Verified: `npm run typecheck`, `npm run lint` (0 errors, 1 warning), `npm test` (10 files, 98 tests, including fast-check properties), `npm run build`.
+
+Implemented and unit-tested: calendar recurrence for daily, weekly (optionally by weekday), fortnightly, monthly, quarterly and yearly rules; documented month-end and leap-year policy; end dates; idempotent generation; completion history; undo of the latest completion; series edits that leave history untouched; DST-aware wall-time to instant conversion (gap moves forward, overlap uses the first instant).
+
+Implemented in the UI, NOT verified in a browser: completing a recurring item advances it and records history; The Crypt lists completed occurrences; The Clocktower shows the next three dates.
+
+Not implemented: edit scopes 'this occurrence' and 'this and future', pause, weekday picker, interval picker (the form offers the six fixed patterns), reminders.

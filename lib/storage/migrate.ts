@@ -53,11 +53,11 @@ const SOURCE_MAP: Record<string, Commitment["sourceType"]> = {
 function legacyRecurrence(value: unknown, dueDate: DateOnly): RecurrenceRule | undefined {
   const { day } = parseDateOnly(dueDate);
   switch (value) {
-    case "weekly": return { frequency: "weekly", interval: 1 };
-    case "fortnightly": return { frequency: "weekly", interval: 2 };
-    case "monthly": return { frequency: "monthly", interval: 1, dayOfMonth: day };
-    case "quarterly": return { frequency: "quarterly", interval: 1, dayOfMonth: day };
-    case "yearly": return { frequency: "yearly", interval: 1 };
+    case "weekly": return { frequency: "weekly", interval: 1, startDate: dueDate };
+    case "fortnightly": return { frequency: "weekly", interval: 2, startDate: dueDate };
+    case "monthly": return { frequency: "monthly", interval: 1, dayOfMonth: day, startDate: dueDate };
+    case "quarterly": return { frequency: "quarterly", interval: 1, dayOfMonth: day, startDate: dueDate };
+    case "yearly": return { frequency: "yearly", interval: 1, startDate: dueDate };
     default: return undefined;
   }
 }

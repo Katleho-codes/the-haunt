@@ -48,6 +48,12 @@ export function makeDateOnly(year: number, month: number, day: number): DateOnly
   return text;
 }
 
+/** Day of week for a calendar date: 0 = Sunday ... 6 = Saturday. */
+export function weekdayOf(value: DateOnly): number {
+  const { year, month, day } = parseDateOnly(value);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
 export function parseDateOnly(value: DateOnly): { year: number; month: number; day: number } {
   if (!isValidDateOnly(value)) throw new RangeError(`Invalid calendar date: ${value}`);
   const [year, month, day] = value.split("-").map(Number);

@@ -18,7 +18,7 @@ describe("draft to commitment", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toMatchObject({ id: "new-id", userId: "user-a", status: "active", amountMinor: 89950, currency: "ZAR", sourceType: "manual" });
-      expect(result.value.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 25 });
+      expect(result.value.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 25, startDate: "2026-11-25" });
     }
   });
   it("omits the currency when there is no amount", () => {
@@ -43,6 +43,11 @@ describe("draft to commitment", () => {
       expect(result.value.recurrence?.dayOfMonth).toBe(31);
       expect(result.value.title).toBe("Renamed");
     }
+  });
+  it("re-anchors a recurring item when its due date is edited", () => {
+    const existing = makeCommitment({ id: "keep", recurrence: { frequency: "monthly", interval: 1, dayOfMonth: 25, startDate: "2026-06-25" } });
+    const result = draftToCommitment({ ...draftFromCommitment(existing), dueDate: "2026-12-05" }, { ...ctx, existing });
+    expect(result.ok && result.value.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 5, startDate: "2026-12-05" });
   });
   it("round-trips repeat choices", () => {
     for (const choice of ["none", "weekly", "fortnightly", "monthly", "quarterly", "yearly"] as const) {

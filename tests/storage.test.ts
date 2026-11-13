@@ -33,7 +33,7 @@ describe("legacy migration", () => {
     expect(item.amountMinor).toBe(89900);
     expect(item.status).toBe("active");
     expect(item.type).toBe("subscription");
-    expect(item.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 25 });
+    expect(item.recurrence).toEqual({ frequency: "monthly", interval: 1, dayOfMonth: 25, startDate: "2026-11-25" });
     expect(item.reminderOffsetsDays).toEqual([3, 1]);
     expect(commitmentSchema.safeParse(item).success).toBe(true);
   });
@@ -45,7 +45,7 @@ describe("legacy migration", () => {
   it("maps fortnightly to a two-week weekly rule and keeps completion", () => {
     const done = { ...legacyItem, recurrence: "fortnightly", status: "completed", completedAt: "2026-11-01T10:00:00.000Z", amount: null };
     const item = migrateLegacyCommitments([done], { userId: "u", timezone: TZ, nowIso: NOW_ISO }).commitments[0];
-    expect(item.recurrence).toEqual({ frequency: "weekly", interval: 2 });
+    expect(item.recurrence).toEqual({ frequency: "weekly", interval: 2, startDate: "2026-11-25" });
     expect(item.status).toBe("completed");
     expect(item.amountMinor).toBeUndefined();
   });
@@ -121,6 +121,24 @@ describe("LocalStorageRepository", () => {
     expect(status.kind).toBe("corrupt");
     if (status.kind === "corrupt") expect(storage.getItem(status.backupKey)).toBe("{not json");
     expect(await repo.list("user-a")).toEqual([]);
+  });
+  it("stores completion history per user and removes it with its commitment", async () => {
+    const { repo } = make();
+    await repo.save("user-a", makeCommitment({ recurrence: { frequency: "monthly", interval: 1 } }));
+    const entry = { id: "c-1:2026-10-25", userId: "user-a", commitmentId: "c-1", dueDate: "2026-10-25", completedAt: NOW_ISO };
+    await repo.replaceOccurrences("user-a", [entry]);
+    expect(await repo.listOccurrences("user-a")).toEqual([entry]);
+    expect(await repo.listOccurrences("user-b")).toEqual([]);
+    await expect(repo.replaceOccurrences("user-b", [entry])).rejects.toThrow();
+    await repo.remove("user-a", "c-1");
+    expect(await repo.listOccurrences("user-a")).toEqual([]);
+  });
+  it("loads data saved before occurrences existed", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem("the-haunt.store.v1.user-a", JSON.stringify({ version: 1, userId: "user-a", commitments: [makeCommitment()], settings: {} }));
+    const repo = new LocalStorageRepository({ storage, timezone: TZ, now: fixedNow });
+    expect((await repo.init("user-a")).kind).toBe("loaded");
+    expect(await repo.listOccurrences("user-a")).toEqual([]);
   });
   it("deletes all user data including legacy copies", async () => {
     const storage = new MemoryStorage();

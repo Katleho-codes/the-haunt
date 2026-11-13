@@ -324,3 +324,4 @@ html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *:before, htm
 .form-error { margin: 0 0 12px; padding: 8px 10px; border: 1px solid rgba(156,69,73,.55); color: #e3b0b2; background: #1a1112; font-size: 11px; }
 .settings-actions { flex-wrap: wrap; }
 .button-danger { color: #e3b0b2; border-color: rgba(156,69,73,.5); background: rgba(156,69,73,.1); }
+.commitment-next { margin-top: 3px; color: #8f9c7e; font: 9px var(--mono); letter-spacing: .04em; }

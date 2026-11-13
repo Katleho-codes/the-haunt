@@ -1,4 +1,4 @@
-import type { Commitment, Settings } from "@/lib/domain/schema";
+import type { Commitment, Occurrence, Settings } from "@/lib/domain/schema";
 
 /**
  * Persistence boundary. Every call takes a userId so a server-backed
@@ -12,6 +12,9 @@ export interface CommitmentRepository {
   save(userId: string, commitment: Commitment): Promise<void>;
   remove(userId: string, id: string): Promise<boolean>;
   replaceAll(userId: string, commitments: Commitment[]): Promise<void>;
+  /** Completed occurrences of recurring commitments. Removed together with their commitment. */
+  listOccurrences(userId: string): Promise<Occurrence[]>;
+  replaceOccurrences(userId: string, occurrences: Occurrence[]): Promise<void>;
   getSettings(userId: string): Promise<Settings>;
   saveSettings(userId: string, settings: Settings): Promise<void>;
   /** Remove every record and setting for this user. */
