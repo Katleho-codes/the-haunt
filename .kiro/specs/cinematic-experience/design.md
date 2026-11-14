@@ -30,3 +30,14 @@ Browser-automation screenshots at 390, 768 and 1280 widths, an axe-style accessi
 - Dialog: Tab is trapped inside, Escape closes, focus returns to the opener.
 - Fonts: loaded with `next/font/google` at build time (self-hosted).
 - Touch: under 768px or on coarse pointers the controls grow to at least 24px with a 44px tap area for the complete button.
+
+## Sound system (13 November 2026)
+
+Replaces the single in-component sound hook. Plan and progress: `docs/sound-system-plan.md`; how to change sounds: `docs/AUDIO.md`.
+
+- `lib/audio/events.ts`: 17 events in six groups. `lib/audio/sound-map.ts`: the one file the owner edits (file path or `null` and a gain per event).
+- `lib/audio/engine.ts`: one AudioContext, master fade, limiter, shared synthesized reverb, file loading with built-in fallback, cooldown and voice cap, ambient bed, hidden-tab suspend, and a debug event log (event names only).
+- `lib/audio/recipes.ts`: built-in sound per event. `lib/audio/ambient.ts`: wind and room tone (owner chose no creaks, thunder or whispers), mood glides over about 4 s.
+- `lib/audio/click-sound.ts` and `components/use-haunt-sound.ts`: one generic click per press, decided at the start of the click; specific actions claim the press so nothing plays twice.
+- `components/sound-test-panel.tsx`: Play per event in The Keeper's Room.
+- `scripts/check-audio.mjs`: path, existence and size check (150 KB per effect, 2 MB ambient, 4 MB total), run by `prebuild`.

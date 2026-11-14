@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Archive, Bell, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight,
@@ -28,7 +28,8 @@ import { reconcileReminders } from "@/lib/reminders/reconcile";
 import { dismissReminder, evaluateReminders, isUnseen, isVisible, markShown, snoozeReminder } from "@/lib/reminders/state";
 import { NotificationCentre, type SnoozeChoice } from "@/components/notification-centre";
 import { addDays } from "@/lib/domain/dates";
-import { ambienceGain, effectGain, GAIN_CEILING } from "@/lib/audio/levels";
+import { useHauntSound } from "@/components/use-haunt-sound";
+import { SoundTestPanel } from "@/components/sound-test-panel";
 import { computeHouseState } from "@/lib/domain/house-state";
 import { shouldReduceMotion } from "@/lib/domain/motion";
 import { buildExportBundle } from "@/lib/storage/export";
@@ -52,78 +53,6 @@ const navItems: { id: ViewId; label: string; subtitle: string; icon: typeof Hous
 function uid() { return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`; }
 function classNames(...values: Array<string | false | null | undefined>) { return values.filter(Boolean).join(" "); }
 
-/**
- * Synthesized sound. Nothing is created until the user has interacted with the page, and nothing plays unless a
- * sound setting is on. Everything goes through one master gain node, and each source is capped by lib/audio/levels.
- */
-function useHauntSound(settings: Settings, activated: boolean) {
-  const contextRef = useRef<AudioContext | null>(null);
-  const masterRef = useRef<GainNode | null>(null);
-  const ensureContext = useCallback(() => {
-    if (!activated) return null;
-    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return null;
-    if (!contextRef.current) {
-      const context = new AudioContextCtor();
-      const master = context.createGain();
-      master.gain.value = 1;
-      master.connect(context.destination);
-      contextRef.current = context;
-      masterRef.current = master;
-    }
-    if (contextRef.current.state === "suspended") void contextRef.current.resume();
-    return contextRef.current;
-  }, [activated]);
-
-  useEffect(() => {
-    if (!settings.ambience) return;
-    const context = ensureContext();
-    const master = masterRef.current;
-    if (!context || !master) return;
-    const oscillator = context.createOscillator();
-    const sub = context.createOscillator();
-    const gain = context.createGain();
-    const subGain = context.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.value = 48;
-    sub.type = "triangle";
-    sub.frequency.value = 53;
-    gain.gain.value = ambienceGain(settings.volume);
-    subGain.gain.value = Math.min(0.004, GAIN_CEILING);
-    oscillator.connect(gain).connect(master);
-    sub.connect(subGain).connect(master);
-    oscillator.start();
-    sub.start();
-    return () => {
-      const now = context.currentTime;
-      gain.gain.setTargetAtTime(0, now, 0.15);
-      subGain.gain.setTargetAtTime(0, now, 0.15);
-      window.setTimeout(() => { try { oscillator.stop(); sub.stop(); } catch { /* already stopped */ } }, 900);
-    };
-  }, [settings.ambience, settings.volume, ensureContext]);
-
-  const chime = useCallback((kind: "complete" | "add" | "warning" = "add") => {
-    if (!settings.effects) return;
-    const context = ensureContext();
-    const master = masterRef.current;
-    if (!context || !master) return;
-    const frequencies = kind === "complete" ? [523.25, 659.25, 783.99] : kind === "warning" ? [110, 103.83] : [392, 523.25];
-    frequencies.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      const start = context.currentTime + index * 0.08;
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(frequency, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(effectGain(settings.volume), start + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + (kind === "warning" ? 0.55 : 0.32));
-      oscillator.connect(gain).connect(master);
-      oscillator.start(start);
-      oscillator.stop(start + 0.62);
-    });
-  }, [ensureContext, settings.effects, settings.volume]);
-  return { chime };
-}
 export default function HauntApp() {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
@@ -146,8 +75,6 @@ export default function HauntApp() {
   const [archiveTab, setArchiveTab] = useState<"active" | "archived">("active");
   const [searchText, setSearchText] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [activated, setActivated] = useState(false);
-  const { chime } = useHauntSound(settings, activated);
 
   const repository = useMemo(
     () => (typeof window === "undefined" ? null : new LocalStorageRepository({ storage: window.localStorage, timezone: browserTimeZone() })),
@@ -185,24 +112,6 @@ export default function HauntApp() {
     document.documentElement.dataset.motion = settings.motion;
     document.documentElement.dataset.intensity = settings.intensity;
   }, [settings, hydrated, repository]);
-  // Ctrl+K or Cmd+K opens search.
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setSearchOpen(true);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  // Audio may only start after the person has interacted with the page.
-  useEffect(() => {
-    const activate = () => setActivated(true);
-    window.addEventListener("pointerdown", activate, { once: true });
-    window.addEventListener("keydown", activate, { once: true });
-    return () => { window.removeEventListener("pointerdown", activate); window.removeEventListener("keydown", activate); };
-  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
@@ -246,6 +155,27 @@ export default function HauntApp() {
   const upcomingTotals = useMemo(() => sumByCurrency([...dueToday, ...upcoming]), [dueToday, upcoming]);
   const restlessCount = overdue.length;
   const mood = useMemo(() => computeHouseState(commitments, today), [commitments, today]);
+  // Sound: one engine, gated on a user gesture and the sound switches. See lib/audio/sound-map.ts to change sounds.
+  const sound = useHauntSound(settings, mood.state);
+  const playSound = sound.play;
+  // Ctrl+K or Cmd+K opens search.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        playSound("ui.open");
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playSound]);
+  // A reminder arriving while the app is open gets a distant bell (text and the bell count show it too).
+  const previousUnseen = useRef(0);
+  useEffect(() => {
+    if (unseenReminders > previousUnseen.current) playSound("reminder.arrive");
+    previousUnseen.current = unseenReminders;
+  }, [unseenReminders, playSound]);
   const nextDue = useMemo(() => [...active].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0], [active]);
   const currentNav = navItems.find((item) => item.id === view) ?? navItems[0];
   // Archived commitments keep their history and are listed under The Archive > Archived, where they can be restored.
@@ -277,8 +207,9 @@ export default function HauntApp() {
   function stampSeal() { if (!reduceMotionNow()) setSeal((n) => (n ?? 0) + 1); }
   // Reminders only become "shown" once the centre has listed them: new ones read NEW while it is open
   // and are recorded as shown when it closes.
-  function openNotifications() { setNotificationsOpen(true); }
-  function closeNotifications() {
+  function openNotifications() { playSound("ui.open"); setNotificationsOpen(true); }
+  function closeNotifications(silent = false) {
+    if (!silent) playSound("ui.close");
     setReminderBase((current) => {
       const nowDate = new Date();
       const settled = evaluateReminders(reconcileReminders(current, commitments, { timezone: settings.timezone, reminderTime: settings.reminderTime }, nowDate), nowDate);
@@ -291,26 +222,35 @@ export default function HauntApp() {
     const until = choice === "hour"
       ? new Date(Date.now() + 3_600_000)
       : zonedDateTimeToInstant(addDays(today, 1), settings.reminderTime, settings.timezone);
+    playSound("reminder.snooze");
     setReminderBase(snoozeReminder(reminders, id, until.toISOString()));
     notify(choice === "hour" ? "Snoozed for one hour." : "Snoozed until tomorrow.");
   }
   function dismissFromCentre(id: string) {
+    playSound("reminder.dismiss");
     setReminderBase(dismissReminder(reminders, id, new Date().toISOString()));
   }
   function openFromCentre(commitmentId: string) {
     const target = commitments.find((item) => item.id === commitmentId);
-    closeNotifications();
+    closeNotifications(true);
     if (target) openEdit(target);
   }
-  function updateSettings(patch: Partial<Settings>) { setSettings((current) => ({ ...current, ...patch })); }
-  function openCreate() { setEditing(null); setProposal(null); setModalOpen(true); }
+  function updateSettings(patch: Partial<Settings>) {
+    const next = { ...settings, ...patch };
+    // Applied inside the click, so switching sound on is heard on the same press.
+    sound.applyNow({ effects: next.effects, ambience: next.ambience, volume: next.volume });
+    setSettings(next);
+  }
+  function openCreate() { playSound("ui.open"); setEditing(null); setProposal(null); setModalOpen(true); }
+  function closeModal() { playSound("ui.close"); setModalOpen(false); setEditing(null); setProposal(null); }
   function openEdit(item: Commitment) {
     // A completed occurrence row edits its series.
     const master = commitments.find((entry) => entry.id === item.id) ?? commitments.find((entry) => occurrences.some((o) => o.id === item.id && o.commitmentId === entry.id));
     if (!master) return;
+    playSound("ui.open");
     setEditing(master); setProposal(null); setModalOpen(true);
   }
-  function navigate(next: ViewId) { setView(next); setSearchText(""); setMobileNavOpen(false); }
+  function navigate(next: ViewId) { playSound("ui.navigate"); setView(next); setSearchText(""); setMobileNavOpen(false); }
 
   function saveCommitment(draft: CommitmentDraft): string[] {
     const result = draftToCommitment(draft, {
@@ -321,14 +261,14 @@ export default function HauntApp() {
       sourceType: proposal ? "pasted_text" : "manual",
       existing: editing ?? undefined,
     });
-    if (!result.ok) return result.errors;
+    if (!result.ok) { playSound("system.error"); return result.errors; }
     const saved = result.value;
+    playSound("commitment.save");
     if (editing) {
       setCommitments((items) => items.map((item) => item.id === saved.id ? saved : item));
       notify("The record has been rewritten.");
     } else {
       setCommitments((items) => [saved, ...items]);
-      chime("add");
       stampSeal();
       notify(proposal ? "Sealed. The commitment has been added to the ledger." : "A new commitment has entered the house.");
     }
@@ -340,21 +280,22 @@ export default function HauntApp() {
     const nowIso = new Date().toISOString();
     if (item.recurrence) {
       const result = completeOccurrence(item, occurrences, nowIso);
-      if (!result.ok) { notify(result.reason); return; }
+      if (!result.ok) { playSound("system.error"); notify(result.reason); return; }
       dissolveRow(item.id);
       setCommitments((items) => items.map((entry) => entry.id === item.id ? result.commitment : entry));
       setOccurrences(result.occurrences);
-      chime("complete");
+      playSound("commitment.complete");
       notify(result.next ? `Laid to rest. Next: ${formatDateOnly(result.next, settings.locale, { day: "numeric", month: "long" })}.` : "Laid to rest. The series has ended.", result.occurrences[result.occurrences.length - 1].id);
       return;
     }
     dissolveRow(item.id);
     setCommitments((items) => items.map((entry) => entry.id === item.id ? completeItem(entry, nowIso) : entry));
-    chime("complete");
+    playSound("commitment.complete");
     notify("Laid to rest. Well done.", item.id);
   }
   function restoreCommitment(item: Commitment) {
     if (item.status === "archived") {
+      playSound("commitment.restore");
       setCommitments((items) => items.map((entry) => entry.id === item.id ? restoreItem(entry, new Date().toISOString()) : entry));
       notify("Restored from the archive.");
       return;
@@ -363,39 +304,48 @@ export default function HauntApp() {
     if (entry) {
       const master = commitments.find((c) => c.id === entry.commitmentId);
       const result = master ? undoLatestCompletion(master, occurrences, entry.id, new Date().toISOString()) : undefined;
-      if (!result || !result.ok) { notify(result && !result.ok ? result.reason : "That series no longer exists."); return; }
+      if (!result || !result.ok) { playSound("system.error"); notify(result && !result.ok ? result.reason : "That series no longer exists."); return; }
+      playSound("commitment.restore");
       setCommitments((items) => items.map((c) => c.id === result.commitment.id ? result.commitment : c));
       setOccurrences(result.occurrences);
       notify("The occurrence has returned to the living.");
       return;
     }
+    playSound("commitment.restore");
     setCommitments((items) => items.map((entry) => entry.id === item.id ? restoreItem(entry, new Date().toISOString()) : entry));
     notify("The commitment has returned to the living.");
   }
   function archiveItem(item: Commitment) {
+    playSound("commitment.archive");
     setCommitments((items) => items.map((entry) => entry.id === item.id ? archiveCommitment(entry, new Date().toISOString()) : entry));
     notify("Archived. Find it under The Archive > Archived to restore it.");
   }
   function deleteCommitment(item: Commitment) {
     const historyEntry = occurrences.find((o) => o.id === item.id);
+    playSound("system.warning");
     if (historyEntry) {
       if (!window.confirm(`Remove this completed record of “${item.title}” from history? The series keeps going.`)) return;
+      playSound("commitment.delete");
       setOccurrences((list) => list.filter((o) => o.id !== historyEntry.id));
       notify("The record has been destroyed.");
       return;
     }
     if (!window.confirm(`Permanently remove “${item.title}”${item.recurrence ? " and its completion history" : ""}?`)) return;
+    playSound("commitment.delete");
     setCommitments((items) => items.filter((entry) => entry.id !== item.id));
     setOccurrences((list) => list.filter((o) => o.commitmentId !== item.id));
     notify("The record has been destroyed.");
   }
   function loadDemoData() {
+    playSound("commitment.save");
     const demo = buildDemoCommitments(LOCAL_USER, settings.timezone, new Date().toISOString());
     setCommitments((items) => [...demo.filter((d) => !items.some((i) => i.id === d.id)), ...items]);
     notify("Fictional demo records added.");
   }
   function deleteAllData() {
+    playSound("system.warning");
     if (!window.confirm("Delete every commitment, completion record, reminder and setting stored in this browser, including any backup copies? This cannot be undone. Export first if you want to keep a copy.")) return;
+    playSound("commitment.delete");
     void repository?.deleteAll(LOCAL_USER).then(() => {
       setCommitments([]);
       setOccurrences([]);
@@ -406,6 +356,7 @@ export default function HauntApp() {
   }
   function handleQuickCapture() {
     if (!quickText.trim()) return;
+    playSound("capture.interpret");
     const parsed = parseCapture(quickText, { now: new Date(), timezone: settings.timezone });
     setProposal({
       ...proposalToReview(parsed, { currency: settings.currency, reminderOffsetsDays: settings.defaultReminderOffsets }),
@@ -433,7 +384,7 @@ export default function HauntApp() {
         <div className="brand-lockup">
           <div className="brand-mark"><Ghost size={21} strokeWidth={1.5} /></div>
           <div><div className="brand-name">THE HAUNT</div><div className="brand-caption">PERSONAL LEDGER OF THE LIVING</div></div>
-          <button className="icon-button sidebar-close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={17}/></button>
+          <button className="icon-button sidebar-close" data-sound="ui.close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={17}/></button>
         </div>
         <div className="sidebar-rule"><span>YOUR HOUSE</span><i /></div>
         <nav className="primary-nav" aria-label="Main navigation">
@@ -458,22 +409,22 @@ export default function HauntApp() {
           <button className="icon-button tiny" onClick={() => navigate("keeper")} aria-label="Open settings"><Settings2 size={16}/></button>
         </div>
       </aside>
-      {mobileNavOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
+      {mobileNavOpen && <button className="mobile-scrim" data-sound="ui.close" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
 
       <section className="main-column">
         <header className="topbar">
-          <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={19}/></button>
+          <button className="icon-button mobile-menu" data-sound="ui.open" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={19}/></button>
           <div className="breadcrumb"><span>THE HAUNT</span><ChevronRight size={13}/><strong>{currentNav.label.toUpperCase()}</strong></div>
           <div className="topbar-actions">
-            <button className="topbar-search" onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K"><Search size={15}/><span>Search the house</span><kbd aria-hidden="true">Ctrl K</kbd></button>
+            <button className="topbar-search" data-sound={searchOpen ? "ui.close" : "ui.open"} onClick={() => setSearchOpen((open) => !open)} aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K"><Search size={15}/><span>Search the house</span><kbd aria-hidden="true">Ctrl K</kbd></button>
             <button ref={bellRef} className="icon-button bell-button" onClick={() => (notificationsOpen ? closeNotifications() : openNotifications())} aria-label={`Reminders: ${unseenReminders} new, ${visibleReminders.length} in total`} aria-expanded={notificationsOpen} title="Reminders"><Bell size={17}/>{(unseenReminders > 0 || visibleReminders.length > 0) && <em className={classNames("bell-count", unseenReminders > 0 && "bell-count-new")}>{unseenReminders > 0 ? unseenReminders : visibleReminders.length}</em>}</button>
-            <button className="icon-button sound-button" onClick={() => updateSettings({ effects: !settings.effects })} aria-label={settings.effects ? "Mute sound effects" : "Enable sound effects"} title="Sound effects"><span className={classNames("sound-indicator", settings.effects && "sound-indicator-on")}/>{settings.effects ? <Volume2 size={17}/> : <VolumeX size={17}/>}</button>
+            <button className="icon-button sound-button" data-sound="ui.toggle" onClick={() => updateSettings({ effects: !settings.effects })} aria-label={settings.effects ? "Mute sound effects" : "Enable sound effects"} title="Sound effects"><span className={classNames("sound-indicator", settings.effects && "sound-indicator-on")}/>{settings.effects ? <Volume2 size={17}/> : <VolumeX size={17}/>}</button>
             <div className="topbar-avatar">K</div>
           </div>
         </header>
 
-        {notificationsOpen && <NotificationCentre reminders={visibleReminders} commitments={commitments} today={today} locale={settings.locale} reminderTime={settings.reminderTime} showTest={showTestReminder} onClose={closeNotifications} onSnooze={snoozeFromCentre} onDismiss={dismissFromCentre} onOpen={openFromCentre} onSendTest={() => setShowTestReminder(true)} onDismissTest={() => setShowTestReminder(false)}/>}
-        {searchOpen && <div className="search-popover" role="search"><Search size={16}/><input autoFocus aria-label="Search commitments" value={searchText} onKeyDown={(event) => { if (event.key === "Escape") { setSearchOpen(false); setSearchText(""); } }} onChange={(event) => { setSearchText(event.target.value); if (view === "today") setView("archive"); }} placeholder="Search commitments, notes, categories..."/><button className="icon-button tiny" aria-label="Close search" onClick={() => { setSearchOpen(false); setSearchText(""); }}><X size={15}/></button></div>}
+        {notificationsOpen && <NotificationCentre reminders={visibleReminders} commitments={commitments} today={today} locale={settings.locale} reminderTime={settings.reminderTime} showTest={showTestReminder} onClose={closeNotifications} onSnooze={snoozeFromCentre} onDismiss={dismissFromCentre} onOpen={openFromCentre} onSendTest={() => { playSound("reminder.arrive"); setShowTestReminder(true); }} onDismissTest={() => setShowTestReminder(false)}/>}
+        {searchOpen && <div className="search-popover" role="search"><Search size={16}/><input autoFocus aria-label="Search commitments" value={searchText} onKeyDown={(event) => { if (event.key === "Escape") { playSound("ui.close"); setSearchOpen(false); setSearchText(""); } }} onChange={(event) => { setSearchText(event.target.value); if (view === "today") setView("archive"); }} placeholder="Search commitments, notes, categories..."/><button className="icon-button tiny" aria-label="Close search" data-sound="ui.close" onClick={() => { setSearchOpen(false); setSearchText(""); }}><X size={15}/></button></div>}
 
         <div className="page-content">
           {hydrated && loadStatus.kind === "corrupt" && <div className="status-banner" role="alert"><AlertTriangle size={15}/><p><strong>Stored data could not be read.</strong> A copy was kept in this browser under <code>{loadStatus.backupKey}</code> and the ledger was started empty.</p></div>}
@@ -530,7 +481,7 @@ export default function HauntApp() {
 
           {view !== "today" && <>
             <section className="inner-page-heading"><div className="eyebrow"><span className="eyebrow-line"/> THE HOUSE / {currentNav.label.toUpperCase()}</div><div className="inner-heading-row"><div><h1>{view === "archive" ? <>The <em>Archive</em></> : view === "clocktower" ? <>The <em>Clocktower</em></> : view === "crypt" ? <>The <em>Crypt</em></> : <>The Keeper&apos;s <em>Room</em></>}</h1><p>{view === "archive" ? "Every loose end, every promise, every date worth remembering." : view === "clocktower" ? "The cycles that turn, again and again." : view === "crypt" ? "The commitments you've successfully laid to rest." : "Make the house feel the way you want it to."}</p></div>{view !== "keeper" && <button className="hero-cta compact-cta" onClick={openCreate}><Plus size={15}/> New commitment</button>}</div></section>
-            {view === "keeper" ? <SettingsView settings={settings} updateSettings={updateSettings} exportData={exportData} total={commitments.length} loadDemoData={loadDemoData} deleteAllData={deleteAllData} /> : <>
+            {view === "keeper" ? <SettingsView settings={settings} updateSettings={updateSettings} exportData={exportData} total={commitments.length} loadDemoData={loadDemoData} deleteAllData={deleteAllData} soundPanel={sound.engine ? <SoundTestPanel engine={sound.engine} version={sound.version} effectsOn={settings.effects} ambienceOn={settings.ambience} /> : null} /> : <>
               {view === "archive" && <div className="archive-tabs" role="group" aria-label="Which commitments to show"><button aria-pressed={archiveTab === "active"} className={classNames("archive-tab", archiveTab === "active" && "archive-tab-on")} onClick={() => setArchiveTab("active")}>Active ({active.length})</button><button aria-pressed={archiveTab === "archived"} className={classNames("archive-tab", archiveTab === "archived" && "archive-tab-on")} onClick={() => setArchiveTab("archived")}>Archived ({archived.length})</button></div>}
               <div className="list-toolbar"><div className="filter-count" role="status">{filtered.length} {view === "crypt" ? "resting records" : showingArchived ? "archived records" : "records in this room"}</div><div className="toolbar-search"><Search size={14}/><input aria-label="Search the ledger" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search the ledger..."/><SlidersHorizontal size={14} aria-hidden="true"/></div></div>
               <div className="commitment-list large-list">{filtered.length === 0 ? <EmptyState title={view === "crypt" ? "The crypt is empty." : showingArchived ? "Nothing is archived." : "Nothing stirs here."} text={view === "crypt" ? "Completed commitments will find their resting place here." : showingArchived ? "Archived commitments keep their history and can be restored from here." : "No commitments match this room yet."} onAction={openCreate}/> : filtered.map((item) => <CommitmentRow key={item.id} item={item} onComplete={completeCommitment} onEdit={openEdit} onDelete={deleteCommitment} onRestore={restoreCommitment} onArchive={archiveItem} today={today} locale={settings.locale} completed={view === "crypt"} archived={showingArchived} nextDates={view === "clocktower" ? nextDates(item, 3) : undefined}/>)}</div>
@@ -541,7 +492,7 @@ export default function HauntApp() {
       </section>
       <button className="floating-add" onClick={openCreate} aria-label="Add commitment"><Plus size={21}/></button>
 
-      {modalOpen && <CommitmentModal initial={editing} proposal={proposal} defaults={{ dueDate: addDays(today, 1), currency: settings.currency, reminders: settings.defaultReminderOffsets }} onClose={() => { setModalOpen(false); setEditing(null); setProposal(null); }} onSave={saveCommitment}/>}
+      {modalOpen && <CommitmentModal initial={editing} proposal={proposal} defaults={{ dueDate: addDays(today, 1), currency: settings.currency, reminders: settings.defaultReminderOffsets }} onClose={closeModal} onSave={saveCommitment}/>}
       {toast && <div className="toast" role="status" aria-live="polite"><span className="toast-icon"><Check size={14}/></span>{toast.message}{toast.undoId && <button className="toast-action" onClick={() => { const target = completed.find((entry) => entry.id === toast.undoId); setToast(null); if (target) restoreCommitment(target); }}>Undo</button>}</div>}
       {seal !== null && <div key={seal} className="seal-stamp" aria-hidden="true" onAnimationEnd={() => setSeal(null)}><WandSparkles size={26}/></div>}
       {!hydrated && <div className="boot-screen"><div className="boot-mark"><Ghost size={28}/></div><span>THE HAUNT</span><i>THE HOUSE IS WAKING</i></div>}
@@ -576,7 +527,7 @@ function CommitmentRow({ item, onComplete, onEdit, onDelete, onRestore, onArchiv
     <div className="commitment-info"><div className="commitment-title-line"><button className="commitment-title" onClick={() => onEdit(item)}>{item.title}</button>{item.recurrence && <span className="recurring-indicator"><RotateCcw size={10}/>{recurrenceLabel(item.recurrence)}</span>}</div><div className="commitment-meta"><span>{categoryLabels[item.type]}</span><i aria-hidden="true">·</i><span>{item.description || "No additional details"}</span></div>{upcomingDates && upcomingDates.length > 0 && <div className="commitment-next">Next: {upcomingDates.map((date) => formatDateOnly(date, locale, { day: "numeric", month: "short" })).join(" · ")}</div>}</div>
     <div className="commitment-due"><strong className={classNames(overdue && "danger-text")}>{dueLabel(item.dueDate, today, locale)}</strong><span>{formatDateOnly(item.dueDate, locale, { day: "2-digit", month: "short", year: "numeric" })}</span></div>
     <div className="commitment-amount">{formatMoney(item.amountMinor, item.currency, locale)}</div>
-    <div className="row-menu-wrap"><button ref={moreRef} className="icon-button tiny row-more" aria-label={`More actions for ${item.title}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" aria-hidden="true" tabIndex={-1} onClick={() => closeMenu(false)}/><div className="row-menu" role="menu" aria-label={`Actions for ${item.title}`} ref={menuRef} onKeyDown={onMenuKey}>{!finished && <button role="menuitem" onClick={() => { onComplete(item); closeMenu(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button role="menuitem" onClick={() => { onEdit(item); closeMenu(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && !finished && <button role="menuitem" onClick={() => { onArchive(item); closeMenu(false); }}><Archive size={14}/> Archive</button>}{finished && <button role="menuitem" onClick={() => { onRestore(item); closeMenu(false); }}><RotateCcw size={14}/> Restore</button>}<button role="menuitem" className="danger-menu" onClick={() => { onDelete(item); closeMenu(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>
+    <div className="row-menu-wrap"><button ref={moreRef} className="icon-button tiny row-more" data-sound={menuOpen ? "ui.close" : "ui.open"} aria-label={`More actions for ${item.title}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={17}/></button>{menuOpen && <><button className="menu-dismiss" data-sound="ui.close" aria-hidden="true" tabIndex={-1} onClick={() => closeMenu(false)}/><div className="row-menu" role="menu" aria-label={`Actions for ${item.title}`} ref={menuRef} onKeyDown={onMenuKey}>{!finished && <button role="menuitem" onClick={() => { onComplete(item); closeMenu(false); }}><CheckCircle2 size={14}/> Mark complete</button>}<button role="menuitem" onClick={() => { onEdit(item); closeMenu(false); }}><Pencil size={14}/> Edit record</button>{item.status === "active" && !finished && <button role="menuitem" onClick={() => { onArchive(item); closeMenu(false); }}><Archive size={14}/> Archive</button>}{finished && <button role="menuitem" onClick={() => { onRestore(item); closeMenu(false); }}><RotateCcw size={14}/> Restore</button>}<button role="menuitem" className="danger-menu" onClick={() => { onDelete(item); closeMenu(false); }}><Trash2 size={14}/> Delete</button></div></>}</div>
   </article>;
 }
 
@@ -644,18 +595,19 @@ function CommitmentModal({ initial, proposal, defaults, onClose, onSave }: {
       <div className="field-row"><label className="field-label">CATEGORY {checkTag("type")}<select className="field-control" value={draft.type} onChange={(event) => set({ type: event.target.value as CommitmentType })}>{COMMITMENT_TYPES.map((key) => <option value={key} key={key}>{categoryLabels[key]}</option>)}</select></label><label className="field-label">DUE DATE {checkTag("dueDate")}<input className="field-control" type="date" value={dueDate} onChange={(event) => set({ dueDate: event.target.value })} required/></label></div>
       <div className="field-row"><label className="field-label">REPEAT {checkTag("recurrence")}<select className="field-control" value={draft.repeat} onChange={(event) => set({ repeat: event.target.value as RepeatChoice })}><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="fortnightly">Every two weeks</option><option value="monthly">Every month</option><option value="quarterly">Every 3 months</option><option value="yearly">Every year</option></select></label><label className="field-label">AMOUNT <span className="optional-label">OPTIONAL</span> {checkTag("amountMinor")}{checkTag("currency")}<div className="amount-control"><select className="field-control currency-select" aria-label="Currency" value={currency} onChange={(event) => set({ currency: event.target.value })}>{[...new Set(["ZAR", "USD", "GBP", "EUR", currency])].map((code) => <option key={code}>{code}</option>)}</select><input className="field-control" type="number" min="0" step="0.01" aria-label="Amount" value={amount} onChange={(event) => set({ amount: event.target.value })} placeholder="0.00"/></div></label></div>
       <div className="reminder-config"><div className="reminder-head"><span>REMIND ME BEFORE</span><button type="button" onClick={() => setShowAdvanced((show) => !show)}>{showAdvanced ? "Hide" : "Customise"} <ChevronDown size={13}/></button></div>{showAdvanced && <div className="reminder-chips">{[14, 7, 3, 1, 0].map((value) => <button type="button" key={value} aria-pressed={reminders.includes(value)} className={classNames("reminder-chip", reminders.includes(value) && "reminder-chip-active")} onClick={() => toggleReminder(value)}>{value === 0 ? "On the day" : `${value} day${value === 1 ? "" : "s"} before`}</button>)}</div>}</div>
-      {errors.length > 0 && <p className="form-error" role="alert">{errors.join(". ")}.</p>}<div className="modal-actions"><button type="button" className="button-quiet" onClick={onClose}>Cancel</button><button type="submit" className="button-primary" disabled={!canSave}>{isProposal ? <><Check size={15}/> Confirm & add to ledger</> : <><Plus size={15}/> {initial ? "Save changes" : "Add to the ledger"}</>}</button></div>
+      {errors.length > 0 && <p className="form-error" role="alert">{errors.join(". ")}.</p>}<div className="modal-actions"><button type="button" className="button-quiet" onClick={onClose}>Cancel</button><button type="submit" className="button-primary" data-sound="none" disabled={!canSave}>{isProposal ? <><Check size={15}/> Confirm & add to ledger</> : <><Plus size={15}/> {initial ? "Save changes" : "Add to the ledger"}</>}</button></div>
     </form>
     <div className="modal-footnote"><LockKeyhole size={11}/> Your entries stay on this device. Nothing is sent anywhere.</div>
   </section></div>;
 }
 
-function SettingsView({ settings, updateSettings, exportData, total, loadDemoData, deleteAllData }: { settings: Settings; updateSettings: (patch: Partial<Settings>) => void; exportData: () => void; total: number; loadDemoData: () => void; deleteAllData: () => void }) {
+function SettingsView({ settings, updateSettings, exportData, total, loadDemoData, deleteAllData, soundPanel }: { settings: Settings; updateSettings: (patch: Partial<Settings>) => void; exportData: () => void; total: number; loadDemoData: () => void; deleteAllData: () => void; soundPanel: ReactNode }) {
   return <div className="settings-layout">
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><Volume2 size={17}/></span><div><h3>Atmosphere & sound</h3><p>Decide how loudly the house should speak.</p></div></div>
       <SettingToggle title="Ambient atmosphere" description="A low, original synthesized room tone." checked={settings.ambience} onChange={(value) => updateSettings({ ambience: value })}/>
       <SettingToggle title="Interaction sounds" description="Subtle tones when records are created or laid to rest." checked={settings.effects} onChange={(value) => updateSettings({ effects: value })}/>
       <div className="setting-range"><div><strong>Sound intensity</strong><span>Keep the volume comfortable.</span></div><div className="range-control"><input type="range" min="0" max="70" aria-label="Sound intensity" value={Math.round(settings.volume * 100)} onChange={(event) => updateSettings({ volume: Number(event.target.value) / 100 })}/><b>{Math.round(settings.volume * 100)}%</b></div></div>
+      {soundPanel}
     </section>
     <section className="settings-card"><div className="settings-card-heading"><span className="settings-icon"><SunMoon size={17}/></span><div><h3>Visual experience</h3><p>Keep the darkness comfortable and accessible.</p></div></div>
       <div className="setting-range"><div><strong>Motion</strong><span>Follow your device, or choose. Reduced motion stops drifting fog and animated transitions.</span></div><select className="field-control settings-select" aria-label="Motion" value={settings.motion} onChange={(event) => updateSettings({ motion: event.target.value as Settings["motion"] })}><option value="system">Follow my device</option><option value="reduced">Reduced</option><option value="full">Full</option></select></div>

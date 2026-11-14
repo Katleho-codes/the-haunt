@@ -101,3 +101,11 @@ Fixed: archived items now have a list and Restore (H-1); controls have accessibl
 How the fixes were checked: new unit tests and e2e steps were mutation-checked (the fix was removed and the checks were seen to fail) for the archived list, switch names, quick-capture label, weight handling, word-currency flag, time note, title cutting and delete-all backups. The reviewer has not re-reviewed.
 
 Still open from the review: text size (M-5), timezone and locale settings (M-7), overdue series needing one click per period (M-8), multi-tab and failed-save handling (M-6), past-date warning (L-8), data import, security headers, public deployment.
+
+## Update 14 November 2026 (sound system)
+
+Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warning), `npm test` (pass, now including the audio tests), `npm run check:audio` (pass), production build (pass, runs the audio check first), `npm run e2e:sound` (13 steps in Edge, pass), `npm run e2e` (30 steps, pass), contrast audit (725 text elements, pass), Docker build (pass, runs the audio check).
+
+Done: a sound for every kind of interaction in six groups; the owner can swap any sound by editing `lib/audio/sound-map.ts` and dropping a file in `public/audio/`, with a built-in fallback; a procedural wind and room tone that follows the house mood (replaced by the owner's loop if one is set); a Sound test panel; sound pauses when the tab is hidden; size and path checks before every build.
+
+Not verified: how anything sounds. The agent cannot hear; the owner must listen and judge. No owner audio files are in the repository yet. Browsers other than Edge were not tested.

@@ -18,3 +18,12 @@ export function ambienceGain(volume: number): number {
 export function effectGain(volume: number): number {
   return Math.min(GAIN_CEILING, Math.max(0.015, safeVolume(volume) / 30));
 }
+
+/**
+ * A base level scaled by one sound's own `gain` from the sound map (0 to 2). The ceiling still wins, so a loud file or
+ * a high gain can never exceed GAIN_CEILING.
+ */
+export function withEntryGain(base: number, entryGain: number): number {
+  const factor = Number.isFinite(entryGain) ? clamp(entryGain, 0, 2) : 1;
+  return Math.min(GAIN_CEILING, Math.max(0, base * factor));
+}

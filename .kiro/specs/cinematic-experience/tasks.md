@@ -17,3 +17,8 @@ Depends on product-foundation 1.6.
 - [ ] 6.12 NOT BUILT. Optional: Clocktower pendulum motif and Crypt resolved-spirit motif.
 
 Verification notes (13 November 2026): 6.2 by unit and property tests (`tests/experience.test.ts`). 6.1, 6.3 to 6.7, 6.10 by `npm run e2e` in Microsoft Edge. 6.9 by `node e2e/contrast.mjs`, which measured 677 text elements across all views and dialogs; it approximates gradient backgrounds by their average colour and skips disabled controls, so it is a strong check, not a full audit. 6.11 by `node e2e/screenshots.mjs` (screenshots in `docs/evidence/screenshots/`), which also found real problems: touch targets under 24px at 390 and 768 px wide, now fixed.
+
+## Sound system (added 13 November 2026, owner request)
+
+- [x] 6.13 Sound map, engine, built-in sounds for every interaction group, ambient wind and room tone following the house mood, Sound test panel, hidden-tab pause, size check, unit and browser tests. Details and checks: `docs/sound-system-plan.md`.
+- [ ] 6.14 Owner listens to the built-in sounds and the ambient bed and approves or asks for changes; owner adds their own files with licences recorded.

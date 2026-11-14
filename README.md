@@ -14,7 +14,8 @@ The current prototype includes:
 - A recurring commitments view, completed-items view and search.
 - Quick text capture with a **deterministic local parser** for common dates, recurring phrases, currencies and categories.
 - An editable review step before captured data is saved.
-- Original synthesized interaction tones and a low ambient tone using the Web Audio API. Sound is off by default.
+- A sound for every kind of interaction (click, open, close, save, complete, delete, reminders and more) plus an ambient wind and room tone that follows the house mood. All built-in sounds are synthesized in code. Sound is off by default, and a Sound test panel in The Keeper's Room plays each one.
+- **Your own sounds:** put audio files in `public/audio/` and point to them in [`lib/audio/sound-map.ts`](lib/audio/sound-map.ts). See [`docs/AUDIO.md`](docs/AUDIO.md). `npm run check:audio` checks paths and size limits, and runs before every build.
 - Sound and reduced-motion preferences.
 - Browser-local persistence and JSON export.
 - Kiro steering, feature specs and a quality-check hook scaffold.
@@ -63,6 +64,7 @@ npm run build
 npx next start -p 3100
 # in a second terminal
 npm run e2e                    # end-to-end smoke test
+npm run e2e:sound              # sound system: right sound per action, gating, hidden tab, test panel
 node e2e/contrast.mjs          # text contrast audit (WCAG AA)
 node e2e/screenshots.mjs       # screenshots at 390, 768 and 1280 px, overflow and touch-target check
 ```
@@ -112,7 +114,10 @@ Commitments, completion history, reminder records and preferences are stored in 
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). Fonts (Cormorant Garamond, DM Sans, IBM Plex Mono) are used under the SIL Open Font License; see `docs/ASSET-REGISTER.md`.
+The code is MIT. See [LICENSE](LICENSE). Two kinds of bundled assets are under their own licences, not MIT:
+
+- Fonts (Cormorant Garamond, DM Sans, IBM Plex Mono): SIL Open Font License, texts in `docs/licenses/`.
+- Sound effects and the ambient loop in `public/audio/`: Pixabay Content License ([summary](https://pixabay.com/service/license-summary/)); see `public/audio/LICENSE-AUDIO.md` and the credits in `docs/ASSET-REGISTER.md`.
 
 ## Kiro workflow
 
