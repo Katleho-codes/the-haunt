@@ -21,4 +21,4 @@ Verification notes (13 November 2026): 6.2 by unit and property tests (`tests/ex
 ## Sound system (added 13 November 2026, owner request)
 
 - [x] 6.13 Sound map, engine, built-in sounds for every interaction group, ambient wind and room tone following the house mood, Sound test panel, hidden-tab pause, size check, unit and browser tests. Details and checks: `docs/sound-system-plan.md`.
-- [ ] 6.14 Owner listens to the built-in sounds and the ambient bed and approves or asks for changes; owner adds their own files with licences recorded.
+- [x] 6.14 Owner added their own files (11 Pixabay MP3s) and approved how they sound on 14 November 2026. Four attributions are still to be confirmed (see `docs/ASSET-REGISTER.md`).

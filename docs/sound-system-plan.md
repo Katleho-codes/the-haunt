@@ -42,7 +42,7 @@ Agreed with the owner on 13 November 2026. Boxes are ticked only after the work 
   Check: recording fake context: every recipe ends within 1 second and never exceeds its peak level.
 - [x] **4. Ambient bed and mood.** Gusting filtered wind and a soft room tone with slow beating; mood changes crossfade over about 4 seconds; restless adds a faint pulse. A file for `ambience.bed` replaces it.
   Check: unit tests for the mood parameters and file replacement (done).
-  - [ ] The owner listens and approves the built-in sounds and the ambient bed. The agent cannot hear them.
+  - [x] The owner listened and approved the sounds on 14 November 2026 ("sounds incredible"). The agent cannot hear them.
 - [x] **5. Wire every interaction.** Generic click sound for any button, menu item or switch; specific sounds for meaningful actions, which suppress the generic click so nothing plays twice. `data-sound` overrides, `data-sound="none"` silences.
   Check: unit test of the click resolver; browser test of each group.
 - [x] **6. Sound test panel.** In The Keeper's Room: a Play button per event, grouped, showing "your file" or "built-in" and any load error; a timed ambient preview.
