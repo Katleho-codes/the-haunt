@@ -108,7 +108,8 @@ Brief "Must Have" items that are knowingly **not** met, by the owner's scope dec
 
 - [x] `LICENSE` is MIT, copyright 2026 Katleho Mabala (confirm the name you want shown).
 - [x] Font licence texts (SIL OFL 1.1) are in `docs/licenses/`. Fonts are bundled by `next/font` at build time.
-- [ ] Icon: confirm who made `public/haunt-icon.svg` and `public/haunted-manor.svg` (the register says original to the project; the owner must confirm).
+- [x] Icon and artwork: `public/haunt-icon.svg` and `public/haunted-manor.svg` were drawn by the owner (confirmed 16 Nov 2026).
+- [x] Audio: all 11 files are from Pixabay under its Content License (no attribution required). Credits are given where known (`docs/ASSET-REGISTER.md`).
 - [ ] Product name "THE HAUNT": the trademark mark was removed from the UI; name clearance has not been done. The owner decides whether to keep the name.
 - [ ] Video: use no unlicensed music or third-party marks. The app's own synthesized sound is original. Do not show real personal data; use the fictional demo data.
 - [ ] No secrets in the repo: `.env.example` holds placeholders only (re-check with a search before publishing).
