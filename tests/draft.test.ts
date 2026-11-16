@@ -4,7 +4,7 @@ import {
   choiceFromRule, draftFromCommitment, draftToCommitment, emptyDraft, ruleFromChoice,
   type CommitmentDraft,
 } from "@/lib/domain/draft";
-import { dueLabel, recurrenceLabel } from "@/lib/domain/present";
+import { dueLabel, formatDateList, recurrenceLabel } from "@/lib/domain/present";
 import { makeCommitment, NOW_ISO } from "./fixtures";
 
 const ctx = { userId: "user-a", timezone: "Africa/Johannesburg", nowIso: NOW_ISO, newId: () => "new-id" };
@@ -62,6 +62,15 @@ describe("presentation", () => {
     expect(dueLabel("2026-11-13", "2026-11-13")).toBe("Due today");
     expect(dueLabel("2026-11-14", "2026-11-13")).toBe("Due tomorrow");
     expect(dueLabel("2026-11-16", "2026-11-13")).toBe("In 3 days");
+  });
+  it("lists dates with the year only where it is not this year", () => {
+    const today = "2026-11-21";
+    expect(formatDateList(["2026-11-25", "2026-12-25"], today, "en-ZA")).toBe("25 Nov · 25 Dec");
+    expect(formatDateList(["2026-11-25", "2026-12-25", "2027-01-25"], today, "en-ZA")).toBe("25 Nov · 25 Dec · 25 Jan 2027");
+    const yearly = formatDateList(["2027-03-18", "2028-03-18", "2029-03-18"], today, "en-ZA");
+    expect(yearly).toBe("18 Mar 2027 · 18 Mar 2028 · 18 Mar 2029");
+    expect(new Set(yearly.split(" · ")).size).toBe(3); // never the same text three times
+    expect(formatDateList([], today, "en-ZA")).toBe("");
   });
   it("labels recurrence", () => {
     expect(recurrenceLabel({ frequency: "weekly", interval: 2 })).toBe("fortnightly");

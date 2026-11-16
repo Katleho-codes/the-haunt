@@ -155,10 +155,26 @@ await step("row menu options are hoverable and sit above the next row", async ()
   await page.mouse.click(5, 5);
 });
 
-await step("clocktower lists the next three dates", async () => {
+await step("clocktower lists the next three dates, with the year where it is not this year", async () => {
   await goto("The Clocktower");
   const text = await row("Fibre account").innerText();
   expect(/Next:/.test(text), "no Next: dates on the fibre row");
+  const yearly = await row("Vehicle licence renewal").locator(".commitment-next").innerText();
+  expect(/2027.*2028.*2029/.test(yearly), `yearly dates should show three different years, got: ${yearly}`);
+});
+
+await step("list search has no dead filter icon, and rows without details show no placeholder", async () => {
+  await goto("The Archive");
+  expect((await page.locator(".toolbar-search svg").count()) === 1, "the search box should only have its search icon");
+  expect(!(await page.locator(".commitment-list").innerText()).includes("No additional details"), "placeholder text is still shown");
+  await page.locator(".floating-add").click();
+  await page.locator('.commitment-modal input[placeholder="e.g. Pay school fees"]').fill("Collect the blue folder");
+  await page.locator(".commitment-modal textarea").fill("Front desk, after 3pm");
+  await page.getByRole("button", { name: "Add to the ledger" }).click();
+  expect((await row("Collect the blue folder").innerText()).includes("Front desk, after 3pm"), "details were not shown on the row");
+  await row("Collect the blue folder").locator(".row-more").click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("menuitem", { name: "Delete" }).click();
 });
 
 await step("completing a recurring item advances it and records history in The Crypt", async () => {
@@ -336,15 +352,111 @@ await step("test reminder is clearly labelled as a test", async () => {
   await page.keyboard.press("Escape");
 });
 
-await step("no horizontal scroll on any view at 390px", async () => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  for (const label of ["The Hall", "The Archive", "The Clocktower", "The Crypt", "Keeper's Room"]) {
-    await page.locator(".mobile-menu").click();
-    await goto(label);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow <= 0, `${label} overflows by ${overflow}px`);
+await step("on phones the first item of Needs your attention is on the first screen", async () => {
+  for (const [width, height] of [[375, 667], [390, 844]]) {
+    const phone = await browser.newContext({ viewport: { width, height }, timezoneId: "Africa/Johannesburg", locale: "en-ZA", hasTouch: true });
+    const p = await phone.newPage();
+    await p.clock.install({ time: new Date("2026-11-25T10:00:00+02:00") }); // the fibre account is due today
+    await p.goto(base);
+    await p.waitForSelector(".boot-screen", { state: "detached" });
+    await p.getByRole("button", { name: "load fictional demo data" }).click();
+    await p.locator(".toast").waitFor({ state: "detached", timeout: 6000 }).catch(() => {});
+    await p.evaluate(() => window.scrollTo(0, 0));
+    const first = p.locator(".content-main .commitment-list").first().locator(".commitment-row, .empty-state").first();
+    const box = await first.boundingBox();
+    expect(box !== null, `${width}x${height}: no first item found`);
+    expect(box.y >= 0 && box.y + box.height <= height, `${width}x${height}: first item spans ${Math.round(box.y)} to ${Math.round(box.y + box.height)}px, screen is ${height}px`);
+    // Larger type must not wrap the due date or the amount onto a second line.
+    const wrapped = await p.locator(".commitment-due strong, .commitment-due span, .commitment-amount").evaluateAll((els) =>
+      els.filter((el) => el.getClientRects().length > 1 || el.getBoundingClientRect().height > parseFloat(getComputedStyle(el).fontSize) * 2).map((el) => el.textContent)); // two lines = wrapped
+    expect(wrapped.length === 0, `${width}x${height}: wrapped text in rows: ${wrapped.slice(0, 3).join(" | ")}`);
+    await phone.close();
+  }
+});
+
+await step("no horizontal scroll and no clipped rows on any view at 390px and 768px", async () => {
+  for (const [width, height] of [[390, 844], [768, 1024]]) {
+    await page.setViewportSize({ width, height });
+    for (const label of ["The Hall", "The Archive", "The Clocktower", "The Crypt", "Keeper's Room"]) {
+      if (width <= 700) await page.locator(".mobile-menu").click();
+      await goto(label);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow <= 0, `${label} at ${width}px overflows by ${overflow}px`);
+      // The shell clips sideways overflow, so also check that no row runs past its list (that hid the row menu).
+      const clipped = await page.evaluate(() => [...document.querySelectorAll(".commitment-list .commitment-row")]
+        .filter((r) => r.getBoundingClientRect().right > r.parentElement.getBoundingClientRect().right + 0.5).length);
+      expect(clipped === 0, `${label} at ${width}px: ${clipped} row(s) run past the edge of the list`);
+      // A cut-off title must end in an ellipsis; text-overflow has no effect on a flex box.
+      const bare = await page.evaluate(() => [...document.querySelectorAll(".commitment-title")]
+        .filter((t) => t.scrollWidth > t.clientWidth + 1)
+        .filter((t) => { const cs = getComputedStyle(t); return cs.textOverflow !== "ellipsis" || cs.display.includes("flex"); })
+        .map((t) => t.textContent));
+      expect(bare.length === 0, `${label} at ${width}px: cut-off title(s) without an ellipsis: ${bare.join(", ")}`);
+    }
   }
   await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+// Room motifs: decorative, hidden from screen readers, only in their own room, never over heading text or buttons.
+const motifReport = (p) => p.evaluate(() => {
+  const motifs = [...document.querySelectorAll(".room-motif")];
+  const svg = motifs[0];
+  if (!svg) return { count: 0 };
+  const m = svg.getBoundingClientRect();
+  // Text is measured by its rendered glyph lines (a block can be wider than its words); controls by their whole box.
+  const boxesOf = (el) => {
+    if (el.matches("button, a, .compact-cta")) return [el.getBoundingClientRect()];
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return [...range.getClientRects()];
+  };
+  const overlaps = (r) => r.width > 0 && r.left < m.right && r.right > m.left && r.top < m.bottom && r.bottom > m.top;
+  const hits = [...svg.closest(".inner-page-heading").querySelectorAll("h1, p, .eyebrow, button, a, .compact-cta")]
+    .filter((el) => !svg.contains(el) && el.getClientRects().length > 0)
+    .filter((el) => boxesOf(el).some(overlaps))
+    .map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}`);
+  const running = svg.getAnimations({ subtree: true }).filter((a) => a.playState === "running").length;
+  return { count: motifs.length, room: svg.dataset.motif, hidden: svg.getAttribute("aria-hidden") === "true", clicks: getComputedStyle(svg).pointerEvents, hits, running, visible: m.width > 0 && m.height > 0 };
+});
+const ROOMS = [["The Archive", "archive"], ["The Clocktower", "clocktower"], ["The Crypt", "crypt"]];
+
+await step("room motifs: one per room, hidden from screen readers, never over heading text or buttons", async () => {
+  for (const [width, height] of [[390, 844], [768, 1024], [1280, 900]]) {
+    await page.setViewportSize({ width, height });
+    for (const [label, room] of [...ROOMS, ["The Hall", null], ["Keeper's Room", null]]) {
+      if (width <= 700) await page.locator(".mobile-menu").click();
+      await goto(label);
+      const r = await motifReport(page);
+      if (!room) { expect(r.count === 0, `${label} at ${width}px should have no motif`); continue; }
+      expect(r.count === 1 && r.room === room, `${label} at ${width}px: expected one ${room} motif, got ${r.count} (${r.room})`);
+      expect(r.visible && r.hidden && r.clicks === "none", `${label} at ${width}px: motif must be visible, aria-hidden and ignore clicks`);
+      expect(r.hits.length === 0, `${label} at ${width}px: motif overlaps ${r.hits.join(", ")}`);
+      expect(r.running > 0, `${label} at ${width}px: motif should move slowly under normal motion`);
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+await step("room motifs stop moving when motion is set to reduced, and under the device setting", async () => {
+  await goto("Keeper's Room");
+  await page.getByLabel("Motion", { exact: true }).selectOption("reduced");
+  for (const [label] of ROOMS) {
+    await goto(label);
+    const r = await motifReport(page);
+    expect(r.count === 1 && r.running === 0, `${label}: ${r.running} motif animation(s) still running with Motion = reduced`);
+  }
+  await goto("Keeper's Room");
+  await page.getByLabel("Motion", { exact: true }).selectOption("system");
+  const quiet = await browser.newContext({ timezoneId: "Africa/Johannesburg", locale: "en-ZA", reducedMotion: "reduce", viewport: { width: 1280, height: 900 } });
+  const q = await quiet.newPage();
+  await q.goto(base);
+  await q.waitForSelector(".boot-screen", { state: "detached" });
+  for (const [label] of ROOMS) {
+    await q.locator(".nav-item", { hasText: label }).click();
+    const r = await motifReport(q);
+    expect(r.count === 1 && r.running === 0, `${label}: ${r.running} motif animation(s) still running under the device reduced-motion setting`);
+  }
+  await quiet.close();
 });
 
 await step("sound is off by default and no audio is created until it is turned on", async () => {

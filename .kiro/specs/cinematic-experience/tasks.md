@@ -14,7 +14,7 @@ Depends on product-foundation 1.6.
 - [x] 6.9 Contrast audit of muted text (`--ash`) on all surfaces; fix failures.
 - [x] 6.10 Self-host fonts or use fallbacks per the asset register; confirm no render-blocking font load.
 - [x] 6.11 Capture screenshots at 390, 768, 1280 widths; fix horizontal scroll or overlap found.
-- [ ] 6.12 NOT BUILT. Optional: Clocktower pendulum motif and Crypt resolved-spirit motif.
+- [x] 6.12 Room motifs: Clocktower pendulum clock, Crypt spirit wisps over a stone tablet, Archive ledger shelf (`components/room-motif.tsx`). Verified 14 Nov 2026 by `npm run e2e`: one per room, `aria-hidden`, no overlap with heading text or button at 390/768/1280 px, still under both reduced-motion paths.
 
 Verification notes (13 November 2026): 6.2 by unit and property tests (`tests/experience.test.ts`). 6.1, 6.3 to 6.7, 6.10 by `npm run e2e` in Microsoft Edge. 6.9 by `node e2e/contrast.mjs`, which measured 677 text elements across all views and dialogs; it approximates gradient backgrounds by their average colour and skips disabled controls, so it is a strong check, not a full audit. 6.11 by `node e2e/screenshots.mjs` (screenshots in `docs/evidence/screenshots/`), which also found real problems: touch targets under 24px at 390 and 768 px wide, now fixed.
 

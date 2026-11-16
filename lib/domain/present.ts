@@ -24,6 +24,19 @@ export function dueLabel(dueDate: DateOnly, today: DateOnly, locale?: string): s
   return formatDateOnly(dueDate, locale, { day: "numeric", month: "long" });
 }
 
+/**
+ * A short list of dates such as the next occurrences. A date shows its year only when it is not in the current year,
+ * so "25 Nov · 25 Dec · 25 Jan 2027", and a yearly item never reads as the same date three times.
+ */
+export function formatDateList(dates: readonly DateOnly[], today: DateOnly, locale?: string): string {
+  const thisYear = today.slice(0, 4);
+  return dates
+    .map((date) => formatDateOnly(date, locale, date.slice(0, 4) === thisYear
+      ? { day: "numeric", month: "short" }
+      : { day: "numeric", month: "short", year: "numeric" }))
+    .join(" · ");
+}
+
 export function recurrenceLabel(rule: RecurrenceRule | undefined): string {
   if (!rule) return "none";
   const n = rule.interval;

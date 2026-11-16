@@ -109,3 +109,19 @@ Verified by commands that ran: typecheck (pass), lint (0 errors, 1 `<img>` warni
 Done: a sound for every kind of interaction in six groups; the owner can swap any sound by editing `lib/audio/sound-map.ts` and dropping a file in `public/audio/`, with a built-in fallback; a procedural wind and room tone that follows the house mood (replaced by the owner's loop if one is set); a Sound test panel; sound pauses when the tab is hidden; size and path checks before every build.
 
 Not verified: how anything sounds. The agent cannot hear; the owner must listen and judge. No owner audio files are in the repository yet. Browsers other than Edge were not tested.
+
+## Update 14 November 2026 (UI polish)
+
+All six items in `docs/ui-polish-plan.md` are done and checked:
+- The Clocktower shows the year on dates that are not in the current year.
+- The dead filter icon is gone from the list search.
+- Text has a floor of 11px mono and 12px body. This closes review item M-5.
+- The "No additional details" placeholder is hidden.
+- The Hall hero is shorter on phones, so the first item that needs attention is on the first screen.
+- Each room has a decorative motif (`components/room-motif.tsx`).
+
+The screenshot review also found and fixed an older layout bug. On phones and tablets, list rows ran past the edge of the list and the row menu was cut off. Long titles on touch screens were cut without an ellipsis.
+
+How it was checked: unit tests and `npm run e2e` (34 steps, Microsoft Edge). New steps cover the motifs (room only, `aria-hidden`, no overlap at 390/768/1280 px, still under reduced motion), clipped rows and titles without an ellipsis, all confirmed to fail before their fix. Also `node e2e/text-size.mjs`, the contrast audit and screenshots reviewed by the agent at three widths. The owner has not yet reviewed the motifs.
+
+Still open from the review: M-6, M-7, M-8, L-8, data import, security headers, public deployment.

@@ -91,7 +91,7 @@ Original checklist, still applicable:
 
 From `docs/REVIEW-2026-11-13.md`, not yet done:
 
-- [ ] M-5 text size (7 to 10px labels), changes the look. Needs owner approval.
+- [x] M-5 text size. Owner approved a floor of 11px mono and 12px body on 14 Nov 2026; `node e2e/text-size.mjs` checks it (2776 elements pass).
 - [ ] M-6 failed saves and two tabs overwriting each other.
 - [ ] M-7 timezone and locale settings in The Keeper's Room.
 - [ ] M-8 an overdue repeating item needs one click per missed period (needs a product decision).
@@ -115,7 +115,7 @@ Brief "Must Have" items that are knowingly **not** met, by the owner's scope dec
 
 ## 7. Final steps, in order
 
-1. Decide the open items above (host, name, M-5/M-7, how much more real Kiro work to do).
+1. Decide the open items above (host, name, M-7, how much more real Kiro work to do).
 2. Make the repository public; confirm the licence shows in About.
 3. Deploy; run the e2e script against the live URL; fix what it finds.
 4. Record the video from the live URL (under 3 minutes); upload to YouTube as public; watch it logged out.
