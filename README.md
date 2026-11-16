@@ -109,7 +109,7 @@ browser --> web container (the only published port) --> api container (internal 
 
 ## Data storage
 
-Commitments, completion history, reminder records and preferences are stored in `localStorage` in the current browser. Nothing is sent anywhere.
+Commitments, completion history, reminder records and preferences are stored in `localStorage` in the current browser and are never sent anywhere. The app has no analytics of its own. The public demo is behind Cloudflare, which collects domain-wide traffic, security and Web Analytics statistics for `lsquared.org.za` (see `docs/PRIVACY-NOTES.md`).
 
 - **Export:** Keeper's Room → Export my data saves all of the above as a JSON file. There is **no import yet**.
 - **Delete:** Keeper's Room → Delete all my data removes everything this app stored in the browser, including corrupt-data backups and any copy from the earlier prototype.

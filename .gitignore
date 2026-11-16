@@ -6,3 +6,6 @@ out/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Private Devpost drafts (owner only)
+submission.md
