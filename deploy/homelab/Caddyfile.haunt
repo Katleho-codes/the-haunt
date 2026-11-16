@@ -1,0 +1,7 @@
+    # THE HAUNT: paste inside the existing `:80 { ... }` block of ~/homelab/Caddyfile.
+    # Everything goes to the frontend. There is deliberately NO /api/* route: the backend (haunt-api:8009) is not on the
+    # homelab network, so Caddy could not reach it anyway, and only the frontend talks to it.
+    @haunt host haunt.lsquared.org.za
+    handle @haunt {
+        reverse_proxy haunt-web:3009
+    }

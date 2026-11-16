@@ -3,7 +3,7 @@
 # THE HAUNT: production image for self-hosting (for example on a homelab). Node 24 is the current Active LTS.
 #
 #   docker build -t the-haunt .
-#   docker run --rm -p 3200:3000 the-haunt        ->  http://localhost:3200
+#   docker run --rm -p 3009:3009 the-haunt        ->  http://localhost:3009
 #
 # The app is local-first: it has no database, no secrets and makes no outbound requests at runtime. Visitors' data stays in
 # their own browser. The container only serves static and server-rendered files.
@@ -34,7 +34,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
-    PORT=3000
+    PORT=3009
 
 # Run as an unprivileged user.
 RUN addgroup -S -g 1001 haunt && adduser -S -u 1001 -G haunt haunt
@@ -45,7 +45,7 @@ COPY --from=build --chown=haunt:haunt /app/public ./public
 COPY --chown=haunt:haunt LICENSE ./LICENSE
 
 USER haunt
-EXPOSE 3000
+EXPOSE 3009
 
 # Reports healthy once the home page answers. busybox wget ships with the alpine image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

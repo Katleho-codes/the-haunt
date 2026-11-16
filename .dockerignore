@@ -19,6 +19,7 @@ coverage
 # Not needed to build or run
 docs
 apps
+deploy
 e2e
 tests
 vitest.config.mts

@@ -95,7 +95,7 @@ browser --> [edge network] --> web container  (published port, the only entry po
                                   +--> [backend network, internal: true] --> api container (no published port, no internet)
 ```
 
-- The API is never published. Only the web container's server-side code talks to it, at `http://api:4000`, with a shared secret in `API_TOKEN` (server-side only; never `NEXT_PUBLIC_*`).
+- The API is never published. Only the web container's server-side code talks to it, at `http://haunt-api:8009`, with a shared secret in `API_TOKEN` (server-side only; never `NEXT_PUBLIC_*`).
 - The browser must never call the API directly. Next.js route handlers or server components act as the backend-for-frontend, so the API can trust only that one caller and the web layer can add authentication, validation and rate limits in front of it.
 - Today `apps/api` is a placeholder with no features and the web app makes no calls to it. The layout is built and tested first so the real NestJS API can drop in without changing exposure.
 - Verified on Docker Desktop for Windows with `scripts/check-isolation.ps1` (16 checks: no published port, internal network, host cannot reach it, web can, token required, no internet or host access from the API, token absent from browser output, non-root). Not verified on a Linux host: there the host machine itself can usually still reach container addresses on a bridge network, so "hidden" means hidden from your LAN and the internet, not from root on the host.

@@ -1,35 +1,33 @@
-# THE HAUNT on a homelab. Usage:
+# THE HAUNT on its own (for trying it on any Docker host). For the homelab stack behind Caddy and the Cloudflare tunnel,
+# use deploy/homelab/ instead: same services, names and ports, but no published port.
 #
-#   docker compose up -d --build                      # web app only (what the app needs today), http://<host>:3200
-#   docker compose --profile backend up -d --build    # also start the hidden API placeholder (optional)
+#   docker compose up -d --build                      # web app only (what the app needs today), http://<host>:3009
+#   docker compose --profile backend up -d --build    # also start the hidden API placeholder (needs API_TOKEN in .env)
 #   docker compose logs -f
 #   docker compose down
 #
-# Change the published port with HAUNT_PORT (for example HAUNT_PORT=8080 docker compose up -d).
-# Put a reverse proxy with HTTPS in front of the web service if it is reachable from outside your network.
-# The app stores nothing on the server: each visitor's data stays in their own browser.
+# Ports: frontend 3009, backend 8009. Only 3009 is published. The app stores nothing on the server: each visitor's data
+# stays in their own browser.
 #
 # Network layout (see apps/api/README.md):
 #
-#   browser --> [edge network] --> web ("the-haunt", the only published port)
+#   browser --> [edge network] --> haunt-web :3009 (the only published port)
 #                                    |
-#                                    +--> [backend network, internal: true] --> api (no published port, no internet)
-#
-# The api service is the only thing on the internal network besides web, so nothing outside Docker can reach it.
+#                                    +--> [haunt_internal, internal: true] --> haunt-api :8009 (no published port, no internet)
 services:
-  the-haunt:
+  haunt-web:
     build: .
     image: the-haunt:local
-    container_name: the-haunt
+    container_name: haunt_web
     restart: unless-stopped
     ports:
-      - "${HAUNT_PORT:-3200}:3000"
+      - "3009:3009"
     networks:
       - edge
-      - backend
+      - haunt_internal
     environment:
       # Server-side only. Not NEXT_PUBLIC_*, so it is never sent to browsers. Nothing reads these yet.
-      API_URL: http://api:4000
+      API_URL: http://haunt-api:8009
       API_TOKEN: ${API_TOKEN:-}
     # The app only serves files, so the container can be locked down.
     read_only: true
@@ -40,17 +38,17 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  api:
+  haunt-api:
     profiles: ["backend"]
     build: ./apps/api
     image: the-haunt-api:local
-    container_name: the-haunt-api
+    container_name: haunt_api
     restart: unless-stopped
     # No `ports:` on purpose. `expose` only documents the port for other containers on the same network.
     expose:
-      - "4000"
+      - "8009"
     networks:
-      - backend
+      - haunt_internal
     environment:
       API_TOKEN: ${API_TOKEN:-}
     read_only: true
@@ -62,8 +60,8 @@ services:
       - no-new-privileges:true
 
 networks:
-  # Normal network: published ports and internet access for the web container.
+  # Normal network: published port and internet access for the web container.
   edge: {}
-  # Internal network: containers on it cannot reach the internet or the host, and nothing outside Docker can reach them.
-  backend:
+  # Internal network: containers on it have no route to the internet, and nothing outside Docker can reach them.
+  haunt_internal:
     internal: true

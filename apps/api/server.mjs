@@ -7,7 +7,7 @@
 import { timingSafeEqual } from "node:crypto";
 import http from "node:http";
 
-const PORT = Number(process.env.PORT ?? 4000);
+const PORT = Number(process.env.PORT ?? 8009);
 const TOKEN = process.env.API_TOKEN ?? "";
 
 if (TOKEN.length < 16) {

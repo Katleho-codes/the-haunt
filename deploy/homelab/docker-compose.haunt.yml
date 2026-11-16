@@ -1,0 +1,74 @@
+# THE HAUNT for ~/homelab/docker-compose.yml. Paste the two services under `services:` and add `haunt_internal` under the
+# top-level `networks:`. Assumes this repository is cloned to ~/homelab/apps/the-haunt. See deploy/homelab/README.md.
+#
+# Ports: frontend 3009, backend 8009. Neither is published to the host. Caddy reaches haunt-web:3009 over the `homelab`
+# network. haunt-api is ONLY on `haunt_internal` (internal: true), so Caddy, the Cloudflare tunnel, the other homelab apps
+# and the internet cannot reach it. Only haunt-web can.
+
+services:
+
+  # ---- paste from here, under `services:` ----
+
+  haunt-web:
+    build:
+      context: ./apps/the-haunt
+      dockerfile: Dockerfile
+    container_name: haunt_web
+    restart: unless-stopped
+    env_file:
+      - ./apps/the-haunt/.env
+    environment:
+      PORT: "3009"
+      # Server-side only (never NEXT_PUBLIC_*). Nothing reads these yet; the app is local-first.
+      API_URL: http://haunt-api:8009
+    depends_on:
+      - haunt-api
+    # Serves files only, so it runs locked down.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - homelab
+      - haunt_internal
+
+  # Placeholder API with no features yet (apps/api/README.md). No `ports:` and not on `homelab`, on purpose.
+  haunt-api:
+    build:
+      context: ./apps/the-haunt/apps/api
+      dockerfile: Dockerfile
+    container_name: haunt_api
+    restart: unless-stopped
+    env_file:
+      - ./apps/the-haunt/.env
+    environment:
+      PORT: "8009"
+    expose:
+      - "8009"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - haunt_internal
+
+  # ---- to here ----
+
+networks:
+
+  # ---- add under the top-level `networks:` (keep your existing `homelab` entry) ----
+
+  haunt_internal:
+    internal: true
+
+  # ---- end ----
+
+  # Already in your file; repeated here only so this snippet is valid on its own.
+  homelab:
+    driver: bridge
